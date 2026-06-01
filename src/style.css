@@ -1,0 +1,956 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: #f5f5f5;
+  color: #333;
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.library-container {
+  padding: 20px;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.logo-section {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.app-logo {
+  width: 64px;
+  height: 64px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+.header h1 {
+  font-size: 28px;
+  color: #2c3e50;
+  margin: 0;
+}
+
+.btn-primary {
+  background-color: #3498db;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 0.3s;
+}
+
+.btn-primary:hover {
+  background-color: #2980b9;
+}
+
+.books-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 150px);
+  gap: 20px 30px;
+  justify-content: center;
+}
+
+.book-card {
+  background: white;
+  border-radius: 8px;
+  padding: 15px;
+  cursor: pointer;
+}
+
+.book-cover {
+  width: 100%;
+  aspect-ratio: 5/7;
+  background: #f5f5f5;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 14px;
+  text-align: center;
+  margin-bottom: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.book-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.book-title {
+  font-size: 16px;
+  font-weight: normal;
+  margin-bottom: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.book-author {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 10px;
+}
+
+.book-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-small {
+  padding: 6px 12px;
+  font-size: 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btn-read {
+  background-color: #27ae60;
+  color: white;
+  flex: 1;
+}
+
+.btn-read:hover {
+  background-color: #229954;
+}
+
+.btn-delete {
+  background-color: #e74c3c;
+  color: white;
+}
+
+.btn-delete:hover {
+  background-color: #c0392b;
+}
+
+.reader-container {
+  display: flex;
+  height: 100vh;
+}
+
+.sidebar {
+  width: 280px;
+  background: white;
+  border-right: 1px solid #e0e0e0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header {
+  padding: 15px 20px;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: flex-end;  /* 关闭按钮靠右对齐 */
+  align-items: center;
+}
+
+.sidebar-header h2 {
+  font-size: 18px;
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #666;
+}
+
+.btn-close:hover {
+  color: #333;
+}
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.tab {
+  flex: 1;
+  padding: 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.tab.active {
+  border-bottom: 2px solid #3498db;
+  color: #3498db;
+}
+
+.tab:hover {
+  background-color: #f5f5f5;
+}
+
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 15px;
+}
+
+.bookmark-item {
+  padding: 12px;
+  margin-bottom: 10px;
+  background: #f9f9f9;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.bookmark-item:hover {
+  background: #f0f0f0;
+}
+
+.bookmark-title {
+  font-weight: 600;
+  margin-bottom: 5px;
+  font-size: 14px;
+}
+
+.bookmark-note {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.bookmark-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.reader-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.reader-toolbar {
+  padding: 15px 20px;
+  background: white;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.toolbar-left, .toolbar-right {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.toolbar-logo {
+  width: 32px;
+  height: 32px;
+  margin-right: 5px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+.btn-icon {
+  background: none;
+  border: 1px solid #ddd;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.btn-icon:hover {
+  background-color: #f5f5f5;
+}
+
+.btn-dark-toggle {
+  padding: 8px;
+  min-width: 36px;
+}
+
+.mode-dropdown {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.mode-select {
+  padding: 8px 32px 8px 16px;
+  background: white;
+  color: #666;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  transition: all 0.2s;
+}
+
+.mode-select:hover {
+  border-color: #667eea;
+  color: #667eea;
+}
+
+.mode-select:focus {
+  border-color: #667eea;
+  outline: none;
+}
+
+.mode-arrow {
+  position: absolute;
+  right: 12px;
+  pointer-events: none;
+  color: #666;
+  transition: color 0.2s;
+}
+
+.mode-select:hover + .mode-arrow,
+.mode-select:focus + .mode-arrow {
+  color: #667eea;
+}
+
+.progress-info {
+  font-size: 14px;
+  color: #666;
+}
+
+#viewer {
+  flex: 1;
+  overflow: auto;  /* 改为 auto 以支持滚动模式 */
+  background-color: #fff;
+  position: relative;
+  min-width: 600px;  /* 设置最小宽度 */
+  max-width: 600px;  /* 限制最大宽度 */
+  margin: 0 auto;    /* 居中显示 */
+}
+
+/* 隐藏 epub-container 的横向滚动条 */
+#viewer .epub-container {
+  overflow-x: hidden !important;
+}
+
+/* 阅读进度拖动条 */
+.reader-progress-bar {
+  position: relative;
+  height: 32px;
+  padding: 0 48px 0 12px;
+  background: #fafafa;
+  border-top: 1px solid #e8e8e8;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.reader-progress-track {
+  flex: 1;
+  height: 4px;
+  background: #e0e0e0;
+  border-radius: 2px;
+  position: relative;
+  overflow: visible;
+}
+
+.reader-progress-fill {
+  height: 100%;
+  background: #667eea;
+  border-radius: 2px;
+  transition: width 0.1s linear;
+}
+
+.reader-progress-thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  background: #667eea;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  cursor: grab;
+  transition: box-shadow 0.15s, left 0.05s linear;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+
+.reader-progress-thumb:active {
+  cursor: grabbing;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  transform: translate(-50%, -50%) scale(1.15);
+}
+
+.reader-progress-bar:hover .reader-progress-fill {
+  background: #5a6fd6;
+}
+
+.reader-progress-label {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: #999;
+  pointer-events: none;
+}
+
+/* 加载动画样式 */
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.95);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.loading-spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 15px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: 16px;
+  color: #666;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #999;
+}
+
+/* 右键菜单样式 */
+.context-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  min-width: 120px;
+  padding: 4px 0;
+}
+
+.context-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.context-menu-item:hover {
+  background-color: #f5f5f5;
+}
+
+/* 批注框样式 */
+.annotation-box {
+  position: fixed;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 350px;
+  max-height: 80vh;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+
+.annotation-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #eee;
+}
+
+.annotation-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #333;
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #999;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.btn-close:hover {
+  color: #333;
+}
+
+.annotation-content {
+  padding: 16px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.selected-text-preview {
+  margin-bottom: 12px;
+  padding: 12px;
+  background: #f9f9f9;
+  border-left: 3px solid #3498db;
+  border-radius: 4px;
+}
+
+.selected-text-preview strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #666;
+  font-size: 12px;
+}
+
+.selected-text-preview p {
+  margin: 0;
+  color: #333;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.annotation-content textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.annotation-content textarea:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.annotation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #eee;
+}
+
+/* 批注弹窗样式 */
+.annotation-popup {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  max-width: 350px;
+  min-width: 250px;
+  padding: 0;
+  animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: #f9f9f9;
+  border-bottom: 1px solid #eee;
+  border-radius: 8px 8px 0 0;
+}
+
+.popup-header strong {
+  color: #333;
+  font-size: 14px;
+}
+
+.popup-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #999;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.popup-close:hover {
+  color: #333;
+}
+
+.popup-content {
+  padding: 12px;
+}
+
+.popup-text,
+.popup-annotation {
+  margin-bottom: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.popup-text:last-child,
+.popup-annotation:last-child {
+  margin-bottom: 0;
+}
+
+.popup-text strong,
+.popup-annotation strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #666;
+  font-size: 12px;
+}
+
+.popup-text {
+  color: #555;
+  background: #f9f9f9;
+  padding: 8px;
+  border-left: 3px solid #3498db;
+  border-radius: 4px;
+}
+
+.popup-annotation {
+  color: #333;
+}
+
+.empty-state p {
+  font-size: 18px;
+  margin-top: 20px;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: white;
+  padding: 30px;
+  border-radius: 8px;
+  width: 400px;
+  max-width: 90%;
+}
+
+.modal h3 {
+  margin-bottom: 20px;
+}
+
+.form-group {
+  margin-bottom: 15px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.form-group input,
+.form-group textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.btn-secondary {
+  background-color: #95a5a6;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background-color: #7f8c8d;
+}
+
+/* 暗黑模式 */
+.reader-container.dark-mode {
+  background: #1a1a2e;
+}
+
+.reader-container.dark-mode .sidebar {
+  background: #16213e;
+  border-right-color: #2a2a4a;
+}
+
+.reader-container.dark-mode .tabs {
+  border-bottom-color: #2a2a4a;
+}
+
+.reader-container.dark-mode .tab {
+  color: #999;
+}
+
+.reader-container.dark-mode .tab.active {
+  color: #667eea;
+  border-bottom-color: #667eea;
+}
+
+.reader-container.dark-mode .tab:hover {
+  background: #1a1a3e;
+}
+
+.reader-container.dark-mode .sidebar-content {
+  color: #ccc;
+}
+
+.reader-container.dark-mode .bookmark-item {
+  background: #1a1a3e;
+}
+
+.reader-container.dark-mode .bookmark-item:hover {
+  background: #2a2a4a;
+}
+
+.reader-container.dark-mode .bookmark-title {
+  color: #e0e0e0;
+}
+
+.reader-container.dark-mode .bookmark-note {
+  color: #999;
+}
+
+.reader-container.dark-mode .btn-primary {
+  background: #667eea;
+}
+
+.reader-container.dark-mode .reader-toolbar {
+  background: #16213e;
+  border-bottom-color: #2a2a4a;
+}
+
+.reader-container.dark-mode .btn-icon {
+  background: #1a1a3e;
+  border-color: #3a3a5a;
+  color: #ccc;
+}
+
+.reader-container.dark-mode .btn-icon:hover {
+  background: #2a2a4a;
+}
+
+.reader-container.dark-mode .mode-select {
+  background: #1a1a3e;
+  color: #ccc;
+  border-color: #3a3a5a;
+}
+
+.reader-container.dark-mode .mode-select:hover,
+.reader-container.dark-mode .mode-select:focus {
+  border-color: #667eea;
+  color: #667eea;
+}
+
+.reader-container.dark-mode .mode-arrow {
+  color: #999;
+}
+
+.reader-container.dark-mode .progress-info {
+  color: #999;
+}
+
+.reader-container.dark-mode #viewer {
+  background: #1e1e32;
+}
+
+.reader-container.dark-mode .empty-state {
+  color: #777;
+}
+
+.reader-container.dark-mode .loading-overlay {
+  background: rgba(26, 26, 46, 0.95);
+}
+
+.reader-container.dark-mode .loading-text {
+  color: #999;
+}
+
+.reader-container.dark-mode .loading-spinner {
+  border-color: #2a2a4a;
+  border-top-color: #667eea;
+}
+
+.reader-container.dark-mode .modal {
+  background: #1a1a2e;
+  color: #ccc;
+}
+
+.reader-container.dark-mode .modal h3 {
+  color: #e0e0e0;
+}
+
+.reader-container.dark-mode .form-group label {
+  color: #999;
+}
+
+.reader-container.dark-mode .form-group input,
+.reader-container.dark-mode .form-group textarea {
+  background: #2a2a4a;
+  border-color: #3a3a5a;
+  color: #ccc;
+}
+
+.reader-container.dark-mode .form-group input:focus,
+.reader-container.dark-mode .form-group textarea:focus {
+  border-color: #667eea;
+}
+
+.reader-container.dark-mode .btn-secondary {
+  background: #3a3a5a;
+  color: #ccc;
+}
+
+.reader-container.dark-mode .btn-secondary:hover {
+  background: #4a4a6a;
+}
+
+.reader-container.dark-mode .annotation-box {
+  background: #16213e;
+  border-color: #2a2a4a;
+}
+
+.reader-container.dark-mode .annotation-header {
+  border-bottom-color: #2a2a4a;
+}
+
+.reader-container.dark-mode .annotation-header h3 {
+  color: #e0e0e0;
+}
+
+.reader-container.dark-mode .selected-text-preview {
+  background: #1a1a3e;
+  border-left-color: #667eea;
+}
+
+.reader-container.dark-mode .selected-text-preview p {
+  color: #ccc;
+}
+
+.reader-container.dark-mode .annotation-content textarea {
+  background: #2a2a4a;
+  border-color: #3a3a5a;
+  color: #ccc;
+}
+
+.reader-container.dark-mode .annotation-actions {
+  border-top-color: #2a2a4a;
+}
+
+/* 暗黑模式 - 进度条 */
+.reader-container.dark-mode .reader-progress-bar {
+  background: #16213e;
+  border-top-color: #2a2a4a;
+}
+
+.reader-container.dark-mode .reader-progress-track {
+  background: #2a2a4a;
+}
+
+.reader-container.dark-mode .reader-progress-fill {
+  background: #667eea;
+}
+
+.reader-container.dark-mode .reader-progress-label {
+  color: #777;
+}

@@ -1,0 +1,81 @@
+{
+  "name": "epub-reader",
+  "version": "1.0.0",
+  "description": "EPUB Reader Desktop Application",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "electron:dev": "cross-env NODE_ENV=development concurrently \"npm run dev\" \"wait-on -t 30000 http://localhost:5173 && electron .\"",
+    "electron:build": "npm run build && electron-builder",
+    "build:win": "powershell -ExecutionPolicy Bypass -File ./build-windows.ps1",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "keywords": [
+    "epub",
+    "reader",
+    "electron",
+    "vue"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "adm-zip": "^0.5.17",
+    "better-sqlite3": "^12.10.0",
+    "epubjs": "^0.3.93",
+    "pinia": "^2.1.0",
+    "vue": "^3.3.0",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.0.0",
+    "concurrently": "^8.0.0",
+    "cross-env": "^10.1.0",
+    "electron": "^28.3.3",
+    "electron-builder": "^24.0.0",
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.34.5",
+    "svg-to-ico": "^1.1.1",
+    "vite": "^5.0.0",
+    "wait-on": "^5.3.0"
+  },
+  "build": {
+    "appId": "com.epubreader.app",
+    "productName": "EPUB Reader",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "db",
+        "to": "db",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/logo-256.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "EPUB Reader"
+    }
+  }
+}

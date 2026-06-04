@@ -268,6 +268,7 @@ body {
   display: flex;
   gap: 10px;
   align-items: center;
+  position: relative;
 }
 
 .toolbar-logo {
@@ -296,6 +297,11 @@ body {
 }
 
 .btn-dark-toggle {
+  padding: 8px;
+  min-width: 36px;
+}
+
+.btn-settings {
   padding: 8px;
   min-width: 36px;
 }
@@ -355,7 +361,7 @@ body {
   background-color: #fff;
   position: relative;
   min-width: 600px;  /* 设置最小宽度 */
-  max-width: 600px;  /* 限制最大宽度 */
+  max-width: 700px;  /* 限制最大宽度 */
   margin: 0 auto;    /* 居中显示 */
 }
 
@@ -953,4 +959,89 @@ body {
 
 .reader-container.dark-mode .reader-progress-label {
   color: #777;
+}
+
+/* 设置面板样式 */
+.settings-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  background: white;
+  border-radius: 8px;
+  min-width: 280px;
+  padding: 15px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  border: 1px solid #e0e0e0;
+}
+
+.settings-dropdown-item {
+  margin-bottom: 12px;
+}
+
+.settings-dropdown-item:last-child {
+  margin-bottom: 0;
+}
+
+.settings-dropdown-item label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  color: #333;
+}
+
+.settings-dropdown-divider {
+  height: 1px;
+  background: #e0e0e0;
+  margin: 12px 0;
+}
+
+.setting-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.font-size-display {
+  min-width: 50px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #666;
+}
+
+.btn-small {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.mode-select-small {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.btn-full {
+  width: 100%;
+  padding: 8px;
+  font-size: 13px;
+}
+
+/* 暗黑模式 - 设置下拉面板 */
+.reader-container.dark-mode .settings-dropdown {
+  background: #1e1e32;
+  border-color: #2a2a4a;
+}
+
+.reader-container.dark-mode .settings-dropdown-item label {
+  color: #e0e0e8;
+}
+
+.reader-container.dark-mode .settings-dropdown-divider {
+  background: #2a2a4a;
+}
+
+.reader-container.dark-mode .font-size-display {
+  color: #aaa;
 }

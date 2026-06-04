@@ -9,6 +9,9 @@ const xml2js = require('xml2js')
 let mainWindow
 let db
 
+// 预编译的数据库语句（提高性能）
+let preparedStatements = {}
+
 // 生成文件的 SHA256 hash 值
 function generateFileHash(filePath) {
   return new Promise((resolve, reject) => {
@@ -230,6 +233,27 @@ function createDatabase() {
     )
   `)
   console.log('Reading progress table created/verified')
+  
+  // 为 reading_progress 表添加索引以优化查询性能
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_reading_progress_book_id ON reading_progress(book_id)')
+    console.log('Index created for reading_progress.book_id')
+  } catch (error) {
+    console.error('Error creating index:', error)
+  }
+  
+  // 预编译常用语句以提高性能
+  preparedStatements.getProgress = db.prepare('SELECT cfi, page, percentage, updated_at FROM reading_progress WHERE book_id = ? LIMIT 1')
+  preparedStatements.saveProgress = db.prepare(`
+    INSERT INTO reading_progress (book_id, cfi, page, percentage)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(book_id) DO UPDATE SET
+      cfi = excluded.cfi,
+      page = excluded.page,
+      percentage = excluded.percentage,
+      updated_at = CURRENT_TIMESTAMP
+  `)
+  console.log('Prepared statements initialized')
   
   db.exec(`
     CREATE TABLE IF NOT EXISTS bookmarks (
@@ -634,15 +658,8 @@ ipcMain.handle('delete-book-completely', (event, bookId) => {
 ipcMain.handle('save-progress', (event, data) => {
   try {
     const { bookId, cfi, page, percentage } = data
-    db.prepare(`
-      INSERT INTO reading_progress (book_id, cfi, page, percentage)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(book_id) DO UPDATE SET
-        cfi = excluded.cfi,
-        page = excluded.page,
-        percentage = excluded.percentage,
-        updated_at = CURRENT_TIMESTAMP
-    `).run(bookId, cfi, page, percentage)
+    // 使用预编译语句提高性能
+    preparedStatements.saveProgress.run(bookId, cfi, page, percentage)
     
     db.prepare('UPDATE books SET last_read_at = CURRENT_TIMESTAMP WHERE id = ?').run(bookId)
     return true
@@ -654,7 +671,8 @@ ipcMain.handle('save-progress', (event, data) => {
 
 ipcMain.handle('get-progress', (event, bookId) => {
   try {
-    const progress = db.prepare('SELECT * FROM reading_progress WHERE book_id = ?').get(bookId)
+    // 使用预编译语句和索引优化查询
+    const progress = preparedStatements.getProgress.get(bookId)
     return progress
   } catch (error) {
     console.error('Error getting progress:', error)

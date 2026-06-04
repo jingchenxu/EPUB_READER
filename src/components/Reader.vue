@@ -1,5 +1,5 @@
 <template>
-  <div v-if="book" class="reader-container" :class="{ 'dark-mode': isDarkMode }">
+  <div v-if="book" class="reader-container" :class="{ 'dark-mode': isDarkMode }" @mousedown="handleContainerClick">
     <div class="sidebar">
       <div class="tabs">
         <button 
@@ -99,6 +99,65 @@
               </template>
             </svg>
           </button>
+          <button class="btn-icon btn-settings" @click="toggleSettingsPanel" title="更多设置" ref="settingsButtonRef">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
+          
+          <!-- 设置下拉面板 -->
+          <div v-if="showSettingsPanel" class="settings-dropdown" ref="settingsDropdownRef" @click.stop>
+            <div class="settings-dropdown-item">
+              <label>字体类型</label>
+              <select v-model="fontFamily" @change="changeFontFamily(fontFamily)" class="mode-select mode-select-small">
+                <option value="">默认字体</option>
+                <option value="SimHei, 'Microsoft YaHei', sans-serif">黑体</option>
+                <option value="SimSun, 'Songti SC', serif">宋体</option>
+                <option value="KaiTi, 'Kaiti SC', cursive">楷体</option>
+                <option value="'Microsoft YaHei', 'PingFang SC', sans-serif">圆体</option>
+                <option value="STFangsong, 'FangSong', serif">方体</option>
+              </select>
+            </div>
+            <div class="settings-dropdown-divider"></div>
+            <div class="settings-dropdown-item">
+              <label>文字加粗</label>
+              <select v-model="isBold" @change="applyTheme" class="mode-select mode-select-small">
+                <option :value="false">关闭</option>
+                <option :value="true">开启</option>
+              </select>
+            </div>
+            <div class="settings-dropdown-divider"></div>
+            <div class="settings-dropdown-item">
+              <label>行间距</label>
+              <select v-model="lineHeight" @change="applyTheme" class="mode-select mode-select-small">
+                <option :value="1.0">1.0</option>
+                <option :value="1.2">1.2</option>
+                <option :value="1.5">1.5</option>
+                <option :value="1.75">1.75</option>
+                <option :value="2.0">2.0</option>
+              </select>
+            </div>
+            <div class="settings-dropdown-divider"></div>
+            <div class="settings-dropdown-item">
+              <label>阅读区域最大宽度（滚动模式）</label>
+              <select v-model="maxReaderWidth" @change="changeMaxReaderWidth(maxReaderWidth)" class="mode-select mode-select-small">
+                <option :value="800">800px</option>
+                <option :value="1000">1000px</option>
+                <option :value="1200">1200px</option>
+                <option :value="1400">1400px</option>
+              </select>
+            </div>
+            <div class="settings-dropdown-divider"></div>
+            <div class="settings-dropdown-item">
+              <label>文字划选菜单</label>
+              <select v-model="textSelectionMenu" class="mode-select mode-select-small">
+                <option value="auto">自动弹出</option>
+                <option value="right">鼠标右键弹出</option>
+                <option value="disabled">彻底禁止弹出</option>
+              </select>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -214,11 +273,20 @@ const currentPage = ref(0)
 const totalPages = ref(0)
 const currentPercentage = ref(0)
 const fontSize = ref(16)
+const fontFamily = ref('')  // 空字符串表示使用默认字体
+const isBold = ref(false)  // 文字加粗
+const lineHeight = ref(1.5)  // 行间距
+const maxReaderWidth = ref(700)  // 阅读区域最大宽度
+const textSelectionMenu = ref('right')  // 文字划选菜单: 'auto' | 'right' | 'disabled'
 const isDarkMode = ref(false)
 const progressBarRef = ref(null)
 let isDragging = false
 const readMode = ref('scrolled')  // 默认滚动阅读
 const isLoading = ref(true)  // 加载状态
+let saveProgressTimer = null  // 进度保存防抖定时器
+const showSettingsPanel = ref(false)  // 设置面板显示状态
+const settingsButtonRef = ref(null)
+const settingsDropdownRef = ref(null)
 
 // 选中文本相关状态
 const showContextMenu = ref(false)
@@ -253,6 +321,10 @@ onUnmounted(() => {
     epubBook.destroy()
   }
   window.removeEventListener('resize', handleResize)
+  // 清理进度保存定时器
+  if (saveProgressTimer) {
+    clearTimeout(saveProgressTimer)
+  }
 })
 
 function handleResize() {
@@ -361,7 +433,8 @@ async function initReader() {
     rendition.on('relocated', (location) => {
       console.log('Page relocated:', location)
       updateProgress(location)
-      saveProgress()
+      // 使用防抖保存进度，减少数据库写入频率
+      debouncedSaveProgress()
     })
 
     // 监听错误
@@ -380,8 +453,26 @@ async function initReader() {
     setTimeout(async () => {
       applyTheme()
       
-      // 先尝试恢复上次阅读进度
-      await bookStore.loadProgress(props.book.id)
+      // 异步加载进度，不阻塞显示
+      const progressPromise = bookStore.loadProgress(props.book.id)
+      
+      // 立即渲染第一页（不等待进度）
+      console.log('Rendering first page immediately...')
+      await rendition.display()
+      console.log('First page rendered')
+      
+      // 隐藏加载提示
+      isLoading.value = false
+      console.log('=== Reader Initialized Successfully ===')
+      
+      // 应用初始最大宽度设置
+      const viewer = document.getElementById('viewer')
+      if (viewer) {
+        viewer.style.maxWidth = maxReaderWidth.value + 'px'
+      }
+      
+      // 等待进度加载完成后恢复位置
+      await progressPromise
       if (bookStore.currentProgress && bookStore.currentProgress.cfi) {
         console.log('Restoring last reading position:', bookStore.currentProgress.cfi)
         console.log('Progress percentage:', bookStore.currentProgress.percentage + '%')
@@ -393,14 +484,14 @@ async function initReader() {
           // 继续执行下面的跳转到第一章逻辑
         } else {
           await rendition.display(cfi)
-          isLoading.value = false  // 加载完成
           // 后台生成 locations（不阻塞显示）
           generateLocationsInBackground()
           return  // 直接返回，不执行后面的跳转逻辑
         }
-      } else {
-        // 如果没有阅读进度，跳转到目录中的第一个章节（跳过封面和版权页）
-        console.log('No saved progress, jumping to first chapter')
+      }
+      
+      // 如果没有阅读进度，跳转到目录中的第一个章节（跳过封面和版权页）
+      console.log('No saved progress, jumping to first chapter')
         if (toc.value && toc.value.length > 0) {
           // 查找第一个非封面/版权的章节
           let firstChapter = null
@@ -446,10 +537,6 @@ async function initReader() {
           console.log('TOC is empty, displaying from start')
           await rendition.display()  // 从开头显示
         }
-      }
-      
-      isLoading.value = false  // 加载完成
-      console.log('=== Reader Initialized Successfully ===')
       
       // 后台生成 locations（不阻塞显示）
       generateLocationsInBackground()
@@ -650,6 +737,17 @@ async function saveProgress() {
   }
 }
 
+// 防抖保存进度（500ms 内只保存一次）
+function debouncedSaveProgress() {
+  if (saveProgressTimer) {
+    clearTimeout(saveProgressTimer)
+  }
+  saveProgressTimer = setTimeout(() => {
+    saveProgress()
+    saveProgressTimer = null
+  }, 500)
+}
+
 async function loadBookmarks() {
   await bookStore.loadBookmarks(props.book.id)
   bookmarks.value = bookStore.bookmarks
@@ -763,9 +861,53 @@ function changeFontSize(delta) {
   applyTheme()
 }
 
+function changeFontFamily(font) {
+  fontFamily.value = font
+  applyTheme()
+}
+
+function toggleBold() {
+  isBold.value = !isBold.value
+  applyTheme()
+}
+
+function changeLineHeight(value) {
+  lineHeight.value = parseFloat(value)
+  applyTheme()
+}
+
+function changeMaxReaderWidth(value) {
+  maxReaderWidth.value = parseInt(value)
+  // 应用宽度变化
+  const viewer = document.getElementById('viewer')
+  if (viewer) {
+    viewer.style.maxWidth = maxReaderWidth.value + 'px'
+  }
+}
+
 function applyTheme() {
   if (rendition) {
     rendition.themes.fontSize(`${fontSize.value}px`)
+    
+    // 应用字体
+    if (fontFamily.value) {
+      rendition.themes.font(fontFamily.value)
+    } else {
+      rendition.themes.font('')
+    }
+    
+    // 应用加粗 - 确保 isBold 是布尔值
+    const bold = isBold.value === true || isBold.value === 'true'
+    console.log('Applying bold:', bold, 'isBold.value:', isBold.value, 'type:', typeof isBold.value)
+    if (bold) {
+      rendition.themes.override('font-weight', 'bold', true)
+    } else {
+      rendition.themes.override('font-weight', 'normal', true)
+    }
+    
+    // 应用行间距
+    rendition.themes.override('line-height', String(lineHeight.value), true)
+    
     refreshAllIframesTheme()
   }
 }
@@ -849,6 +991,56 @@ function refreshAllIframesTheme() {
 function toggleDarkMode() {
   isDarkMode.value = !isDarkMode.value
   refreshAllIframesTheme()
+}
+
+function toggleSettingsPanel() {
+  showSettingsPanel.value = !showSettingsPanel.value
+}
+
+// 点击外部关闭设置面板
+function handleClickOutside(event) {
+  console.log('handleClickOutside called', event.target)
+  if (!showSettingsPanel.value) {
+    console.log('Panel not shown, skip')
+    return
+  }
+  
+  // 检查是否点击了设置按钮或下拉面板
+  const isClickOnButton = settingsButtonRef.value && settingsButtonRef.value.contains(event.target)
+  const isClickOnDropdown = settingsDropdownRef.value && settingsDropdownRef.value.contains(event.target)
+  
+  console.log('isClickOnButton:', isClickOnButton, 'isClickOnDropdown:', isClickOnDropdown)
+  
+  if (!isClickOnButton && !isClickOnDropdown) {
+    console.log('Closing panel')
+    showSettingsPanel.value = false
+  }
+}
+
+// 容器点击处理（用于关闭设置面板）
+function handleContainerClick(event) {
+  console.log('handleContainerClick called', event.target)
+  console.log('showSettingsPanel.value:', showSettingsPanel.value)
+  
+  if (!showSettingsPanel.value) {
+    console.log('Panel not shown, skip')
+    return
+  }
+  
+  // 检查是否点击了设置按钮或下拉面板
+  const isClickOnButton = settingsButtonRef.value && settingsButtonRef.value.contains(event.target)
+  const isClickOnDropdown = settingsDropdownRef.value && settingsDropdownRef.value.contains(event.target)
+  
+  console.log('settingsButtonRef.value:', settingsButtonRef.value)
+  console.log('settingsDropdownRef.value:', settingsDropdownRef.value)
+  console.log('isClickOnButton:', isClickOnButton, 'isClickOnDropdown:', isClickOnDropdown)
+  
+  if (!isClickOnButton && !isClickOnDropdown) {
+    console.log('Closing panel from container click')
+    showSettingsPanel.value = false
+  } else {
+    console.log('Click is on button or dropdown, keep panel open')
+  }
 }
 
 async function handleAddBookmark() {
@@ -987,6 +1179,11 @@ function changeReadMode() {
 function handleContextMenu(event) {
   console.log('handleContextMenu called')
   
+  // 如果设置为彻底禁止弹出，直接返回
+  if (textSelectionMenu.value === 'disabled') {
+    return
+  }
+  
   // 获取选中的文本
   const selection = window.getSelection()
   const text = selection.toString().trim()
@@ -996,6 +1193,11 @@ function handleContextMenu(event) {
   if (!text) {
     // 没有选中文本，不显示菜单
     console.log('No text selected, skipping menu')
+    return
+  }
+  
+  // 如果是右键模式，检查是否是右键事件
+  if (textSelectionMenu.value === 'right' && event.type !== 'contextmenu') {
     return
   }
   
@@ -1058,6 +1260,22 @@ function setupIframeContextMenu() {
       console.log('Iframe contentDocument accessible:', !!iframe.contentDocument)
       console.log('Iframe src:', iframe.src)
       
+      // 在 iframe 内部添加点击事件监听器，用于关闭设置面板
+      iframe.contentDocument.addEventListener('mousedown', (event) => {
+        if (!showSettingsPanel.value) {
+          return
+        }
+        
+        // 检查是否点击了设置按钮或下拉面板
+        const isClickOnButton = settingsButtonRef.value && settingsButtonRef.value.contains(event.target)
+        const isClickOnDropdown = settingsDropdownRef.value && settingsDropdownRef.value.contains(event.target)
+        
+        if (!isClickOnButton && !isClickOnDropdown) {
+          showSettingsPanel.value = false
+        }
+      })
+      console.log('✅ Iframe mousedown listener for settings panel added')
+      
       // 监听 iframe 内部的右键事件
       iframe.contentDocument.addEventListener('contextmenu', (event) => {
         console.log('Iframe contextmenu triggered at:', event.clientX, event.clientY)
@@ -1103,8 +1321,13 @@ function setupIframeContextMenu() {
         // 计算菜单位置，确保在可视区域内
         const menuWidth = 120  // 菜单宽度
         const menuHeight = 80  // 菜单高度
-        let menuX = event.clientX
-        let menuY = event.clientY
+        
+        // 获取 iframe 的位置偏移
+        const iframeRect = iframe.getBoundingClientRect()
+        
+        // 将 iframe 内部的坐标转换为外层文档的坐标
+        let menuX = event.clientX + iframeRect.left
+        let menuY = event.clientY + iframeRect.top
         
         // 如果菜单会超出右边界，向左调整
         if (menuX + menuWidth > window.innerWidth) {

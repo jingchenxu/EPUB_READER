@@ -12,7 +12,6 @@
  */
 export function buildFileUrl(relativePath, userDataPath, appPath) {
   if (!relativePath) {
-    console.warn('buildFileUrl: relativePath is empty')
     return ''
   }
 
@@ -39,15 +38,6 @@ export function buildFileUrl(relativePath, userDataPath, appPath) {
   // Windows: file:///C:/Users/...
   // Unix: file:///home/...
   const fileUrl = `file:///${absolutePath}`
-
-  console.log('buildFileUrl:', {
-    relativePath,
-    userDataPath,
-    appPath,
-    isProduction,
-    absolutePath,
-    fileUrl
-  })
 
   return fileUrl
 }

@@ -537,9 +537,7 @@ function getAddedTime(addedAt) {
 }
 
 async function handleOpenEpub() {
-  console.log('handleOpenEpub called')
-  const result = await bookStore.openEpub()
-  console.log('openEpub result:', result)
+  await bookStore.openEpub()
 }
 
 function handleReadBook(book) {
@@ -568,11 +566,9 @@ async function handleDeleteBook(bookId) {
 
 // 选择分类
 async function selectCategory(categoryId) {
-  console.log('Selecting category:', categoryId)
   showSettings.value = false
   showCloudStorage.value = false
   await bookStore.selectCategory(categoryId)
-  console.log('Books after selection:', bookStore.books.length)
 }
 
 // 显示书籍右键菜单
@@ -859,8 +855,6 @@ onMounted(async () => {
     appPath.value = await window.electronAPI.getAppPath()
     userDataPath.value = await window.electronAPI.getUserDataPath()
     appPathLoaded.value = true
-    console.log('App path loaded:', appPath.value)
-    console.log('User data path loaded:', userDataPath.value)
     
     // 加载分类和书籍
     await bookStore.loadCategories()
@@ -875,12 +869,10 @@ onMounted(async () => {
 
 function getCoverUrlSync(book) {
   if (!book || !book.cover_path) {
-    console.log('No cover path for book:', book.title)
     return ''
   }
   
   if (!appPathLoaded.value) {
-    console.warn('Paths not loaded yet for book:', book.title)
     return ''
   }
   

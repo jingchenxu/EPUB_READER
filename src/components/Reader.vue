@@ -99,6 +99,12 @@
               </template>
             </svg>
           </button>
+          <button class="btn-icon btn-search" @click="toggleSearchPanel" title="全文搜索" ref="searchButtonRef">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/>
+              <path d="m21 21-4.35-4.35"/>
+            </svg>
+          </button>
           <button class="btn-icon btn-settings" @click="toggleSettingsPanel" title="更多设置" ref="settingsButtonRef">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="3"/>
@@ -245,6 +251,66 @@
         </div>
       </div>
     </div>
+
+    <!-- 搜索抽屉 -->
+    <div :class="['search-drawer', { 'open': showSearchPanel }]" ref="searchDropdownRef">
+      <div class="search-drawer-header">
+        <h3>全文搜索</h3>
+        <button class="btn-icon btn-close-search" @click="showSearchPanel = false">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="search-drawer-content">
+        <div class="search-input-wrapper">
+          <input 
+            v-model="searchQuery" 
+            @input="handleSearchInput"
+            @keyup.enter="searchNext"
+            placeholder="输入关键词搜索..."
+            class="search-input"
+          />
+        </div>
+        <div class="search-navigation">
+          <button class="btn-search-nav" @click="searchPrev" title="上一个">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 15l-6-6-6 6"/>
+            </svg>
+            上一个
+          </button>
+          <button class="btn-search-nav" @click="searchNext" title="下一个">
+            下一个
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </button>
+        </div>
+        <div v-if="isSearching" class="search-status">
+          搜索中...
+        </div>
+        <div v-else-if="searchResults.length > 0" class="search-results-info">
+          找到 {{ searchResults.length }} 个结果，当前第 {{ currentSearchIndex + 1 }} 个
+        </div>
+        
+        <!-- 搜索结果列表 -->
+        <div v-if="searchResults.length > 0" class="search-results-list">
+          <div 
+            v-for="(result, idx) in searchResults" 
+            :key="idx"
+            :class="['search-result-item', { active: idx === currentSearchIndex }]"
+            @click="goToSearchResult(idx)"
+          >
+            <div class="search-result-chapter">{{ result.chapter }}</div>
+            <div class="search-result-excerpt" v-html="highlightText(result.excerpt, searchQuery)"></div>
+          </div>
+        </div>
+        
+        <div v-else-if="searchQuery" class="search-no-results">
+          未找到匹配内容
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -276,7 +342,7 @@ const fontSize = ref(16)
 const fontFamily = ref('')  // 空字符串表示使用默认字体
 const isBold = ref(false)  // 文字加粗
 const lineHeight = ref(1.5)  // 行间距
-const maxReaderWidth = ref(700)  // 阅读区域最大宽度
+const maxReaderWidth = ref(800)  // 阅读区域最大宽度
 const textSelectionMenu = ref('right')  // 文字划选菜单: 'auto' | 'right' | 'disabled'
 const isDarkMode = ref(false)
 const progressBarRef = ref(null)
@@ -287,6 +353,16 @@ let saveProgressTimer = null  // 进度保存防抖定时器
 const showSettingsPanel = ref(false)  // 设置面板显示状态
 const settingsButtonRef = ref(null)
 const settingsDropdownRef = ref(null)
+
+// 搜索相关状态
+const showSearchPanel = ref(false)  // 搜索面板显示状态
+const searchButtonRef = ref(null)
+const searchDropdownRef = ref(null)
+const searchQuery = ref('')  // 搜索关键词
+const searchResults = ref([])  // 搜索结果列表
+const currentSearchIndex = ref(-1)  // 当前选中的搜索结果索引
+const isSearching = ref(false)  // 是否正在搜索
+let searchDebounceTimer = null  // 搜索防抖定时器
 
 // 选中文本相关状态
 const showContextMenu = ref(false)
@@ -301,10 +377,6 @@ let rendition = null
 let epubBook = null
 
 onMounted(async () => {
-  console.log('=== Reader Component Mounted ===')
-  console.log('Book prop:', props.book)
-  console.log('Is production:', !import.meta.env.DEV)
-  
   await initReader()
   await loadBookmarks()
   await loadAnnotations()  // 加载批注
@@ -327,6 +399,14 @@ onUnmounted(() => {
   }
 })
 
+// 监听 maxReaderWidth 变化，自动应用
+watch(maxReaderWidth, (newValue) => {
+  const viewer = document.getElementById('viewer')
+  if (viewer) {
+    viewer.style.setProperty('max-width', newValue + 'px', 'important')
+  }
+})
+
 function handleResize() {
   // 固定列宽模式下，不需要重新调整
   // 如果需要响应式，可以取消下面的注释
@@ -337,10 +417,6 @@ function handleResize() {
 
 async function initReader() {
   try {
-    console.log('=== Initializing Reader ===')
-    console.log('Book:', props.book)
-    console.log('Book path:', props.book.book_path)
-    
     if (!props.book.book_path) {
       throw new Error('Book path is undefined')
     }
@@ -351,14 +427,12 @@ async function initReader() {
     
     // 使用路径工具函数构建书籍文件 URL
     const filePath = buildFileUrl(props.book.book_path, userDataPath, appPath)
-    console.log('Loading EPUB from:', filePath)
     
     epubBook = ePub(filePath)
-    console.log('EPUB instance created')
     
     // 监听 EPUB 加载事件
     epubBook.loaded.metadata.then((metadata) => {
-      console.log('EPUB metadata loaded:', metadata)
+      // Metadata loaded
     }).catch((error) => {
       console.error('Failed to load EPUB metadata:', error)
     })
@@ -375,20 +449,21 @@ async function initReader() {
     if (readMode.value === 'scrolled') {
       renderOptions.manager = 'continuous'
       renderOptions.overflow = 'auto'
+      // 确保滚动模式加载所有内容
+      renderOptions.snap = false
+    } else {
+      // Paginated mode
     }
 
     rendition = epubBook.renderTo('viewer', renderOptions)
-    console.log('Rendition created with flow:', readMode.value)
 
     // 通过 hooks.content 直接向 iframe 注入暗黑模式样式
     // 绕过 epubjs themes API 的不可靠切换问题
     rendition.hooks.content.register((contents) => {
       applyIframeTheme(contents)
     })
-    console.log('Content hook registered')
 
     // 先不显示，等待加载 TOC 和恢复进度后再显示
-    console.log('Loading TOC...')
 
     // 检查 viewer 容器的内容
     setTimeout(() => {
@@ -397,7 +472,7 @@ async function initReader() {
         // 检查是否有 iframe
         const iframe = viewerElement.querySelector('iframe')
         if (!iframe) {
-          console.warn('No iframe found in viewer!')
+          // No iframe found
         }
       }
     }, 500)
@@ -413,16 +488,14 @@ async function initReader() {
             rendition.resize(viewer.clientWidth, viewer.clientHeight)
           }
         } catch (e) {
-          console.warn('Resize failed:', e)
+          // Resize failed
         }
       }
     }, 500)
 
     rendition.on('rendered', () => {
-      console.log('Page rendered')
       const location = rendition.currentLocation()
       if (location) {
-        console.log('Current location:', location)
         updateProgress(location)
       }
       
@@ -431,7 +504,6 @@ async function initReader() {
     })
 
     rendition.on('relocated', (location) => {
-      console.log('Page relocated:', location)
       updateProgress(location)
       // 使用防抖保存进度，减少数据库写入频率
       debouncedSaveProgress()
@@ -447,7 +519,6 @@ async function initReader() {
 
     const loadedToc = await epubBook.loaded.navigation
     toc.value = loadedToc.toc
-    console.log('TOC loaded:', toc.value.length, 'chapters')
 
     // 先显示内容，再生成 locations（优化首次加载速度）
     setTimeout(async () => {
@@ -457,30 +528,26 @@ async function initReader() {
       const progressPromise = bookStore.loadProgress(props.book.id)
       
       // 立即渲染第一页（不等待进度）
-      console.log('Rendering first page immediately...')
       await rendition.display()
-      console.log('First page rendered')
       
       // 隐藏加载提示
       isLoading.value = false
-      console.log('=== Reader Initialized Successfully ===')
       
       // 应用初始最大宽度设置
       const viewer = document.getElementById('viewer')
       if (viewer) {
-        viewer.style.maxWidth = maxReaderWidth.value + 'px'
+        viewer.style.setProperty('max-width', maxReaderWidth.value + 'px', 'important')
       }
       
       // 等待进度加载完成后恢复位置
       await progressPromise
       if (bookStore.currentProgress && bookStore.currentProgress.cfi) {
-        console.log('Restoring last reading position:', bookStore.currentProgress.cfi)
-        console.log('Progress percentage:', bookStore.currentProgress.percentage + '%')
+        // Check if saved position is cover/copyright page
         
         // 检查是否是封面或版权页，如果是则跳转到第一章
         const cfi = bookStore.currentProgress.cfi
         if (cfi.includes('titlepage') || cfi.includes('copyright') || cfi.includes('cover')) {
-          console.log('Saved position is cover/copyright page, jumping to first chapter instead')
+          // Saved position is cover/copyright page, jumping to first chapter instead
           // 继续执行下面的跳转到第一章逻辑
         } else {
           await rendition.display(cfi)
@@ -491,7 +558,6 @@ async function initReader() {
       }
       
       // 如果没有阅读进度，跳转到目录中的第一个章节（跳过封面和版权页）
-      console.log('No saved progress, jumping to first chapter')
         if (toc.value && toc.value.length > 0) {
           // 查找第一个非封面/版权的章节
           let firstChapter = null
@@ -527,14 +593,11 @@ async function initReader() {
           }
           
           if (firstChapter) {
-            console.log('Jumping to first chapter:', firstChapter.label)
             await rendition.display(firstChapter.href)
           } else {
-            console.log('No suitable chapter found, displaying from start')
             await rendition.display()  // 从开头显示
           }
         } else {
-          console.log('TOC is empty, displaying from start')
           await rendition.display()  // 从开头显示
         }
       
@@ -542,9 +605,7 @@ async function initReader() {
       generateLocationsInBackground()
     }, 300)  // 减少等待时间到 300ms
   } catch (error) {
-    console.error('=== Failed to initialize reader ===')
-    console.error('Error:', error)
-    console.error('Error stack:', error.stack)
+    console.error('Failed to initialize reader:', error.message)
     alert('无法打开书籍文件: ' + error.message)
     emit('close')
   }
@@ -553,11 +614,10 @@ async function initReader() {
 // 后台生成 locations（不阻塞首次显示）
 async function generateLocationsInBackground() {
   try {
-    console.log('Generating locations in background...')
     const startTime = Date.now()
     await epubBook.locations.generate(160)  // 每 160 个字符一个位置
     const duration = ((Date.now() - startTime) / 1000).toFixed(2)
-    console.log(`Locations generated in ${duration}s:`, epubBook.locations.length)
+    // Locations generated successfully
   } catch (error) {
     console.error('Failed to generate locations:', error)
   }
@@ -572,29 +632,22 @@ function updateProgress(location) {
     if (readMode.value === 'scrolled') {
       // 滚动模式：尝试使用 epub.js 提供的整书百分比
       const rawPercentage = location.start.percentage
-      console.log('Scroll mode - Raw percentage:', rawPercentage, 'Type:', typeof rawPercentage)
       
       if (rawPercentage !== undefined && rawPercentage !== null && rawPercentage > 0) {
         currentPercentage.value = Math.round(rawPercentage * 100)
-        console.log('Using raw percentage:', currentPercentage.value + '%')
       } else {
         // 如果 percentage 不可用或为0，尝试其他方法
-        console.warn('Percentage not available or is 0, trying alternative methods...')
-        
         // 尝试使用 CFI 来估算进度（需要加载完整的 locations）
         if (epubBook && epubBook.locations) {
           const cfi = location.start.cfi
           const percentage = epubBook.locations.percentageFromCfi(cfi)
           if (percentage !== undefined && percentage !== null) {
             currentPercentage.value = Math.round(percentage * 100)
-            console.log('Using locations percentage:', currentPercentage.value + '%')
           } else {
             currentPercentage.value = 0
-            console.log('Locations percentage also unavailable')
           }
         } else {
           currentPercentage.value = 0
-          console.log('No locations available')
         }
       }
     } else {
@@ -608,15 +661,6 @@ function updateProgress(location) {
         currentPercentage.value = 0
       }
     }
-    
-    console.log('Location data:', {
-      mode: readMode.value,
-      page: currentPage.value,
-      total: totalPages.value,
-      percentage: currentPercentage.value + '%',
-      rawPercentage: location.start.percentage,
-      cfi: location.start.cfi
-    })
   }
 }
 
@@ -636,17 +680,14 @@ function getPercentFromEvent(event) {
 /** 根据百分比跳转到书籍对应位置 */
 function jumpToPercent(percent) {
   if (!rendition || !epubBook) return
-  console.log('jumpToPercent called with:', percent + '%')
 
   try {
     // 尝试通过 locations 计算 CFI 并跳转
     const locs = epubBook.locations
     const locCount = locs && (locs._locations ? locs._locations.length : locs.length)
-    console.log('Locations count:', locCount)
 
     if (locCount > 0) {
       const cfi = locs.cfiFromPercentage(percent / 100)
-      console.log('CFI from percentage:', cfi)
       if (cfi) {
         rendition.display(cfi)
         // 滚动模式：display() 会打断 continuous manager 的章节串联，
@@ -668,32 +709,27 @@ function jumpToPercent(percent) {
     if (spine && spine.length > 0) {
       const idx = Math.floor((percent / 100) * (spine.length - 1))
       const target = spine.get(idx)
-      console.log('Fallback: jumping to spine index', idx, 'of', spine.length)
       if (target) {
         rendition.display(target.href || target.idref)
         return
       }
     }
 
-    console.warn('No valid jump target found for', percent + '%')
+    // No valid jump target found
   } catch (e) {
     console.error('Failed to jump to percentage:', e)
   }
 }
 
 function handleProgressClick(event) {
-  console.log('handleProgressClick fired, isDragging:', isDragging)
   if (isDragging) return
   const percent = getPercentFromEvent(event)
-  console.log('Click percent:', percent)
   jumpToPercent(percent)
 }
 
 function handleProgressMouseDown(event) {
-  console.log('handleProgressMouseDown fired')
   isDragging = true
   const percent = getPercentFromEvent(event)
-  console.log('Mousedown percent:', percent)
   jumpToPercent(percent)
 
   const onMouseMove = (e) => {
@@ -756,10 +792,8 @@ async function loadBookmarks() {
 // 加载批注
 async function loadAnnotations() {
   try {
-    console.log('Loading annotations for book:', props.book.id)
     const loadedAnnotations = await window.electronAPI.getAnnotations(props.book.id)
     annotations.value = loadedAnnotations
-    console.log('Loaded', loadedAnnotations.length, 'annotations')
     
     // 在文本上标记批注
     highlightAnnotations()
@@ -771,8 +805,6 @@ async function loadAnnotations() {
 // 高亮显示批注
 function highlightAnnotations() {
   if (!rendition || !annotations.value.length) return
-  
-  console.log('Highlighting', annotations.value.length, 'annotations')
   
   // 清除之前的高亮
   rendition.annotations.remove()
@@ -796,7 +828,6 @@ function highlightAnnotations() {
           'mix-blend-mode': 'multiply'
         }
       )
-      console.log('Highlighted annotation:', annotation.id)
     } catch (e) {
       console.warn('Failed to highlight annotation:', annotation.id, e.message)
     }
@@ -819,10 +850,36 @@ function showAnnotationPopup(annotation, event) {
     </div>
   `
   
-  // 定位弹窗
+  // 定位弹窗 - 使用 event.target 的位置
+  let popupX, popupY
+  
+  // 尝试从 event.target 获取位置
+  if (event.target && event.target.getBoundingClientRect) {
+    const rect = event.target.getBoundingClientRect()
+    // 使用高亮区域的中心位置
+    popupX = rect.left + rect.width / 2
+    popupY = rect.bottom + 10  // 在高亮区域下方显示
+  } else {
+    // 备用方案：使用 clientX/Y
+    popupX = event.clientX + 10
+    popupY = event.clientY + 10
+  }
+  
+  // 确保弹窗不超出视口边界
+  const popupWidth = 300
+  const popupHeight = 200
+  
+  if (popupX + popupWidth > window.innerWidth) {
+    popupX = window.innerWidth - popupWidth - 10
+  }
+  
+  if (popupY + popupHeight > window.innerHeight) {
+    popupY = window.innerHeight - popupHeight - 10
+  }
+  
   popup.style.position = 'fixed'
-  popup.style.left = (event.clientX + 10) + 'px'
-  popup.style.top = (event.clientY + 10) + 'px'
+  popup.style.left = popupX + 'px'
+  popup.style.top = popupY + 'px'
   popup.style.zIndex = '2000'
   
   document.body.appendChild(popup)
@@ -881,7 +938,7 @@ function changeMaxReaderWidth(value) {
   // 应用宽度变化
   const viewer = document.getElementById('viewer')
   if (viewer) {
-    viewer.style.maxWidth = maxReaderWidth.value + 'px'
+    viewer.style.setProperty('max-width', maxReaderWidth.value + 'px', 'important')
   }
 }
 
@@ -898,16 +955,13 @@ function applyTheme() {
     
     // 应用加粗 - 确保 isBold 是布尔值
     const bold = isBold.value === true || isBold.value === 'true'
-    console.log('Applying bold:', bold, 'isBold.value:', isBold.value, 'type:', typeof isBold.value)
     if (bold) {
       rendition.themes.override('font-weight', 'bold', true)
     } else {
       rendition.themes.override('font-weight', 'normal', true)
     }
     
-    // 应用行间距
-    rendition.themes.override('line-height', String(lineHeight.value), true)
-    
+    // 刷新所有 iframe 的主题（会重新应用行间距）
     refreshAllIframesTheme()
   }
 }
@@ -930,11 +984,19 @@ function applyIframeTheme(contents) {
   const oldStyle = doc.getElementById('rosa-theme-style')
   if (oldStyle) oldStyle.remove()
 
+  // 构建样式内容
+  let cssText = ''
+  
+  // 应用行间距
+  cssText += `
+    body, p, div, span, li, td, th, blockquote, dd, dt, pre, code, h1, h2, h3, h4, h5, h6 {
+      line-height: ${lineHeight.value} !important;
+    }
+  `
+  
   if (dark) {
     // 注入暗黑模式样式（!important 覆盖 EPUB 自带样式）
-    const style = doc.createElement('style')
-    style.id = 'rosa-theme-style'
-    style.textContent = `
+    cssText += `
       body {
         background: #1e1e32 !important;
         color: #e8e8ec !important;
@@ -955,8 +1017,13 @@ function applyIframeTheme(contents) {
         filter: brightness(0.9);
       }
     `
-    head.appendChild(style)
   }
+  
+  // 创建并注入样式标签
+  const style = doc.createElement('style')
+  style.id = 'rosa-theme-style'
+  style.textContent = cssText
+  head.appendChild(style)
 }
 
 /**
@@ -984,7 +1051,7 @@ function refreshAllIframesTheme() {
       contents.forEach(c => applyIframeTheme(c))
     }
   } catch (e) {
-    console.warn('getContents failed:', e)
+    // getContents failed
   }
 }
 
@@ -997,49 +1064,228 @@ function toggleSettingsPanel() {
   showSettingsPanel.value = !showSettingsPanel.value
 }
 
-// 点击外部关闭设置面板
-function handleClickOutside(event) {
-  console.log('handleClickOutside called', event.target)
-  if (!showSettingsPanel.value) {
-    console.log('Panel not shown, skip')
-    return
+// 切换搜索面板
+function toggleSearchPanel() {
+  showSearchPanel.value = !showSearchPanel.value
+  if (showSearchPanel.value) {
+    // 打开搜索面板时聚焦输入框
+    setTimeout(() => {
+      const searchInput = document.querySelector('.search-input')
+      if (searchInput) searchInput.focus()
+    }, 100)
+  }
+}
+
+// 处理搜索输入（防抖）
+function handleSearchInput() {
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
   }
   
-  // 检查是否点击了设置按钮或下拉面板
-  const isClickOnButton = settingsButtonRef.value && settingsButtonRef.value.contains(event.target)
-  const isClickOnDropdown = settingsDropdownRef.value && settingsDropdownRef.value.contains(event.target)
+  searchDebounceTimer = setTimeout(() => {
+    if (searchQuery.value.trim()) {
+      performSearch()
+    } else {
+      clearSearch()
+    }
+  }, 300)
+}
+
+// 执行搜索
+async function performSearch() {
+  if (!epubBook || !searchQuery.value.trim()) return
   
-  console.log('isClickOnButton:', isClickOnButton, 'isClickOnDropdown:', isClickOnDropdown)
+  isSearching.value = true
+  searchResults.value = []
+  currentSearchIndex.value = -1
   
-  if (!isClickOnButton && !isClickOnDropdown) {
-    console.log('Closing panel')
-    showSettingsPanel.value = false
+  try {
+    const query = searchQuery.value.trim().toLowerCase()
+    const results = []
+    
+    // 获取所有章节（spine）
+    const spine = epubBook.spine
+    if (!spine || !spine.items) {
+      isSearching.value = false
+      return
+    }
+    
+    // 遍历所有章节
+    for (let i = 0; i < spine.items.length; i++) {
+      const item = spine.items[i]
+      
+      try {
+        // 加载章节内容
+        const chapter = await epubBook.load(item.href)
+        
+        if (chapter && chapter.documentElement) {
+          // 提取文本内容
+          const text = chapter.documentElement.textContent || ''
+          const lowerText = text.toLowerCase()
+          
+          // 查找所有匹配位置
+          let position = 0
+          while ((position = lowerText.indexOf(query, position)) !== -1) {
+            // 提取上下文（前后各50个字符）
+            const start = Math.max(0, position - 50)
+            const end = Math.min(text.length, position + query.length + 50)
+            const excerpt = text.substring(start, end).trim()
+            
+            // 生成 CFI（简化版，使用章节索引和位置）
+            const cfi = item.cfiBase || `epubcfi(/6/${i + 2}!/${item.href})`
+            
+            results.push({
+              href: item.href,  // 使用章节 href 进行跳转
+              excerpt: excerpt,
+              chapter: item.label || `第${i + 1}章`,
+              index: i,
+              position: position  // 记录匹配位置
+            })
+            
+            position += query.length
+            
+            // 限制每个章节最多返回10个结果
+            if (results.filter(r => r.index === i).length >= 10) {
+              break
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`Error loading chapter ${i}:`, error)
+      }
+    }
+    
+    if (results.length > 0) {
+      searchResults.value = results
+      currentSearchIndex.value = 0
+      // 跳转到第一个搜索结果
+      goToSearchResult(0)
+    }
+  } catch (error) {
+    console.error('Search error:', error)
+  } finally {
+    isSearching.value = false
+  }
+}
+
+// 清除搜索
+function clearSearch() {
+  searchResults.value = []
+  currentSearchIndex.value = -1
+  
+  // 移除高亮
+  if (rendition) {
+    rendition.annotations.remove(undefined, 'highlight')
+  }
+}
+
+// 高亮文本中的关键词
+function highlightText(text, query) {
+  if (!query || !text) return text
+  
+  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+  return text.replace(regex, '<mark class="search-highlight">$1</mark>')
+}
+
+// 跳转到指定搜索结果
+function goToSearchResult(index) {
+  if (index < 0 || index >= searchResults.value.length) return
+  
+  currentSearchIndex.value = index
+  const result = searchResults.value[index]
+  
+  if (rendition && result.href) {
+    try {
+      // 清除之前的高亮
+      rendition.annotations.remove(undefined, 'highlight')
+      
+      // 跳转到结果所在的章节
+      rendition.display(result.href)
+        .then(() => {
+          // Successfully navigated to chapter
+        })
+        .catch((error) => {
+          console.error('Failed to navigate to chapter:', error)
+        })
+    } catch (error) {
+      console.error('Error in goToSearchResult:', error)
+    }
+  }
+}
+
+// 上一个搜索结果
+function searchPrev() {
+  if (searchResults.value.length === 0) return
+  
+  let newIndex = currentSearchIndex.value - 1
+  if (newIndex < 0) {
+    newIndex = searchResults.value.length - 1  // 循环到最后一个
+  }
+  goToSearchResult(newIndex)
+}
+
+// 下一个搜索结果
+function searchNext() {
+  if (searchResults.value.length === 0) return
+  
+  let newIndex = currentSearchIndex.value + 1
+  if (newIndex >= searchResults.value.length) {
+    newIndex = 0  // 循环到第一个
+  }
+  goToSearchResult(newIndex)
+}
+
+// 点击外部关闭设置面板
+function handleClickOutside(event) {
+  // 关闭设置面板
+  if (showSettingsPanel.value) {
+    const isClickOnButton = settingsButtonRef.value && settingsButtonRef.value.contains(event.target)
+    const isClickOnDropdown = settingsDropdownRef.value && settingsDropdownRef.value.contains(event.target)
+    
+    if (!isClickOnButton && !isClickOnDropdown) {
+      showSettingsPanel.value = false
+    }
+  }
+  
+  // 关闭搜索面板
+  if (showSearchPanel.value) {
+    const isClickOnButton = searchButtonRef.value && searchButtonRef.value.contains(event.target)
+    const isClickOnDropdown = searchDropdownRef.value && searchDropdownRef.value.contains(event.target)
+    
+    if (!isClickOnButton && !isClickOnDropdown) {
+      showSearchPanel.value = false
+    }
   }
 }
 
 // 容器点击处理（用于关闭设置面板）
 function handleContainerClick(event) {
-  console.log('handleContainerClick called', event.target)
-  console.log('showSettingsPanel.value:', showSettingsPanel.value)
-  
-  if (!showSettingsPanel.value) {
-    console.log('Panel not shown, skip')
-    return
+  // 关闭设置面板
+  if (showSettingsPanel.value) {
+    const isClickOnButton = settingsButtonRef.value && settingsButtonRef.value.contains(event.target)
+    const isClickOnDropdown = settingsDropdownRef.value && settingsDropdownRef.value.contains(event.target)
+    
+    if (!isClickOnButton && !isClickOnDropdown) {
+      showSettingsPanel.value = false
+    }
   }
   
-  // 检查是否点击了设置按钮或下拉面板
-  const isClickOnButton = settingsButtonRef.value && settingsButtonRef.value.contains(event.target)
-  const isClickOnDropdown = settingsDropdownRef.value && settingsDropdownRef.value.contains(event.target)
+  // 关闭搜索面板
+  if (showSearchPanel.value) {
+    const isClickOnButton = searchButtonRef.value && searchButtonRef.value.contains(event.target)
+    const isClickOnDropdown = searchDropdownRef.value && searchDropdownRef.value.contains(event.target)
+    
+    if (!isClickOnButton && !isClickOnDropdown) {
+      showSearchPanel.value = false
+    }
+  }
   
-  console.log('settingsButtonRef.value:', settingsButtonRef.value)
-  console.log('settingsDropdownRef.value:', settingsDropdownRef.value)
-  console.log('isClickOnButton:', isClickOnButton, 'isClickOnDropdown:', isClickOnDropdown)
-  
-  if (!isClickOnButton && !isClickOnDropdown) {
-    console.log('Closing panel from container click')
-    showSettingsPanel.value = false
-  } else {
-    console.log('Click is on button or dropdown, keep panel open')
+  // 关闭右键菜单
+  if (showContextMenu.value) {
+    const contextMenu = document.querySelector('.context-menu')
+    if (contextMenu && !contextMenu.contains(event.target)) {
+      showContextMenu.value = false
+    }
   }
 }
 
@@ -1068,12 +1314,9 @@ async function handleDeleteBookmark(bookmarkId) {
 function changeReadMode() {
   if (!rendition || !epubBook) return
   
-  console.log('Changing read mode to:', readMode.value)
-  
   // 保存当前位置
   const location = rendition.currentLocation()
   const currentCfi = location?.start?.cfi
-  console.log('Saving current position:', currentCfi)
   
   // 销毁当前渲染
   rendition.destroy()
@@ -1081,8 +1324,6 @@ function changeReadMode() {
   // 重新创建渲染
   setTimeout(async () => {
     try {
-      console.log('Creating new rendition with flow:', readMode.value)
-      
       // 根据阅读模式使用不同的配置
       const renderOptions = {
         width: '100%',
@@ -1097,61 +1338,43 @@ function changeReadMode() {
       if (readMode.value === 'scrolled') {
         renderOptions.manager = 'continuous'  // 使用连续管理器
         renderOptions.overflow = 'auto'
+        renderOptions.snap = false  // 禁用吸附，允许自由滚动
+      } else {
+        // Paginated mode
       }
       
       rendition = epubBook.renderTo('viewer', renderOptions)
-      console.log('Rendition created with options:', renderOptions)
       
       // 注册内容钩子以应用主题
       rendition.hooks.content.register((contents) => {
         applyIframeTheme(contents)
       })
-      console.log('Content hook registered')
       
       // 恢复到之前的位置或从开头开始
       if (currentCfi) {
-        console.log('Displaying at saved position:', currentCfi)
         await rendition.display(currentCfi)
       } else {
-        console.log('Displaying from beginning')
         await rendition.display()
       }
-      console.log('Display completed')
       
       // 检查 viewer 容器的状态
       const viewerElement = document.getElementById('viewer')
       if (viewerElement) {
-        console.log('Viewer element:', viewerElement)
-        console.log('Viewer offsetWidth:', viewerElement.offsetWidth)
-        console.log('Viewer offsetHeight:', viewerElement.offsetHeight)
-        console.log('Viewer scrollHeight:', viewerElement.scrollHeight)
-        console.log('Viewer children:', viewerElement.children.length)
-        
         const iframe = viewerElement.querySelector('iframe')
         if (iframe) {
-          console.log('Iframe found')
-          console.log('Iframe offsetWidth:', iframe.offsetWidth)
-          console.log('Iframe offsetHeight:', iframe.offsetHeight)
-          console.log('Iframe style:', iframe.style.cssText)
-          
           // 如果是滚动模式且宽度为0，强制设置宽度
           if (readMode.value === 'scrolled' && iframe.offsetWidth === 0) {
-            console.warn('Iframe width is 0 in scrolled mode, fixing...')
             const container = iframe.parentElement
             if (container) {
               container.style.width = viewerElement.offsetWidth + 'px'
               iframe.style.width = viewerElement.offsetWidth + 'px'
-              console.log('Fixed iframe width to:', viewerElement.offsetWidth)
             }
           }
-        } else {
-          console.warn('No iframe found in viewer!')
         }
       }
       
       // 重新绑定事件
       rendition.on('rendered', () => {
-        console.log('Page rendered in new mode')
         const location = rendition.currentLocation()
         if (location) {
           updateProgress(location)
@@ -1159,15 +1382,12 @@ function changeReadMode() {
       })
       
       rendition.on('relocated', (location) => {
-        console.log('Page relocated in new mode')
         updateProgress(location)
         saveProgress()
       })
       
       // 重新设置 iframe 的右键事件监听
       setupIframeContextMenu()
-      
-      console.log('Read mode changed successfully')
     } catch (error) {
       console.error('Failed to change read mode:', error)
       alert('切换阅读模式失败: ' + error.message)
@@ -1177,8 +1397,6 @@ function changeReadMode() {
 
 // 右键菜单处理
 function handleContextMenu(event) {
-  console.log('handleContextMenu called')
-  
   // 如果设置为彻底禁止弹出，直接返回
   if (textSelectionMenu.value === 'disabled') {
     return
@@ -1188,11 +1406,8 @@ function handleContextMenu(event) {
   const selection = window.getSelection()
   const text = selection.toString().trim()
   
-  console.log('Selected text:', text ? text.substring(0, 50) : '(empty)')
-  
   if (!text) {
     // 没有选中文本，不显示菜单
-    console.log('No text selected, skipping menu')
     return
   }
   
@@ -1257,37 +1472,46 @@ function setupIframeContextMenu() {
         return false
       }
       
-      console.log('Iframe contentDocument accessible:', !!iframe.contentDocument)
-      console.log('Iframe src:', iframe.src)
       
-      // 在 iframe 内部添加点击事件监听器，用于关闭设置面板
+      // 在 iframe 内部添加点击事件监听器，用于关闭设置面板和右键菜单
       iframe.contentDocument.addEventListener('mousedown', (event) => {
-        if (!showSettingsPanel.value) {
-          return
+        // 关闭设置面板
+        if (showSettingsPanel.value) {
+          const isClickOnButton = settingsButtonRef.value && settingsButtonRef.value.contains(event.target)
+          const isClickOnDropdown = settingsDropdownRef.value && settingsDropdownRef.value.contains(event.target)
+          
+          if (!isClickOnButton && !isClickOnDropdown) {
+            showSettingsPanel.value = false
+          }
         }
         
-        // 检查是否点击了设置按钮或下拉面板
-        const isClickOnButton = settingsButtonRef.value && settingsButtonRef.value.contains(event.target)
-        const isClickOnDropdown = settingsDropdownRef.value && settingsDropdownRef.value.contains(event.target)
+        // 关闭搜索面板
+        if (showSearchPanel.value) {
+          const isClickOnButton = searchButtonRef.value && searchButtonRef.value.contains(event.target)
+          const isClickOnDropdown = searchDropdownRef.value && searchDropdownRef.value.contains(event.target)
+          
+          if (!isClickOnButton && !isClickOnDropdown) {
+            showSearchPanel.value = false
+          }
+        }
         
-        if (!isClickOnButton && !isClickOnDropdown) {
-          showSettingsPanel.value = false
+        // 关闭右键菜单
+        if (showContextMenu.value) {
+          const contextMenu = document.querySelector('.context-menu')
+          if (contextMenu && !contextMenu.contains(event.target)) {
+            showContextMenu.value = false
+          }
         }
       })
-      console.log('✅ Iframe mousedown listener for settings panel added')
       
       // 监听 iframe 内部的右键事件
       iframe.contentDocument.addEventListener('contextmenu', (event) => {
-        console.log('Iframe contextmenu triggered at:', event.clientX, event.clientY)
         
         // 从 iframe 内部获取选中的文本
         const iframeSelection = iframe.contentWindow.getSelection()
         const text = iframeSelection.toString().trim()
         
-        console.log('Text from iframe selection:', text ? text.substring(0, 50) : '(empty)')
-        
         if (!text) {
-          console.log('No text selected in iframe, skipping menu')
           return
         }
         
@@ -1307,9 +1531,7 @@ function setupIframeContextMenu() {
               const content = contents[0]
               const cfi = content.cfiFromRange(range)
               selectedCfi.value = cfi
-              console.log('Selected CFI:', cfi)
             } else {
-              console.warn('No content available for CFI generation')
               selectedCfi.value = ''
             }
           } catch (e) {
@@ -1349,11 +1571,7 @@ function setupIframeContextMenu() {
           y: menuY
         }
         showContextMenu.value = true
-        
-        console.log('✅ Context menu shown for text:', text.substring(0, 50))
-        console.log('Menu position:', { x: menuX, y: menuY })
       })
-      console.log('✅ Iframe contextmenu listener added successfully')
       return true
     } catch (e) {
       console.error('❌ Cannot access iframe contentDocument:', e.message)
@@ -1372,14 +1590,11 @@ function setupIframeContextMenu() {
   const maxAttempts = 10
   const retryInterval = setInterval(() => {
     attempts++
-    console.log(`Retrying iframe listener setup (${attempts}/${maxAttempts})...`)
     
     if (trySetupListener(attempts)) {
       clearInterval(retryInterval)
-      console.log('✅ Iframe listener setup successful after retries')
     } else if (attempts >= maxAttempts) {
       clearInterval(retryInterval)
-      console.error('❌ Failed to setup iframe listener after maximum attempts')
     }
   }, 500)
 }

@@ -7,7 +7,7 @@
  * 获取存储的 auth token
  */
 export function getAuthToken() {
-  return localStorage.getItem('auth_token')
+  return localStorage.getItem('auth_token_full') || localStorage.getItem('auth_token')
 }
 
 /**
@@ -25,7 +25,8 @@ export function createAuthHeaders(options = {}) {
   
   // 如果有 token，添加到请求头
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+    // 如果 token 已包含类型前缀（如 "Bearer xxx"），直接使用；否则添加 "Bearer" 前缀
+    headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`
   }
   
   return {

@@ -35,114 +35,124 @@ function generateFileHash(filePath) {
 // 从 EPUB 文件中提取元数据
 async function extractEpubMetadata(filePath) {
   try {
-    console.log('Extracting metadata from:', filePath)
-    const zip = new AdmZip(filePath)
     
-    // 读取 container.xml 找到 content.opf 的位置
-    const containerXml = zip.readAsText('META-INF/container.xml')
-    if (!containerXml) {
-      throw new Error('Invalid EPUB: container.xml not found')
-    }
-    
-    const containerParser = new xml2js.Parser()
-    const container = await containerParser.parseStringPromise(containerXml)
-    const rootFilePath = container.container.rootfiles[0].rootfile[0].$['full-path']
-    
-    // 读取 content.opf 文件
-    const opfXml = zip.readAsText(rootFilePath)
-    if (!opfXml) {
-      throw new Error('Invalid EPUB: content.opf not found')
-    }
-    
-    const opfParser = new xml2js.Parser()
-    const opf = await opfParser.parseStringPromise(opfXml)
-    const metadata = opf.package.metadata[0]
-    
-    // 提取基本信息
-    const bookInfo = {
-      title: metadata['dc:title'] ? metadata['dc:title'][0] : path.basename(filePath, '.epub'),
-      author: metadata['dc:creator'] ? (Array.isArray(metadata['dc:creator']) ? metadata['dc:creator'][0]._ || metadata['dc:creator'][0] : metadata['dc:creator']) : '未知作者',
-      publisher: metadata['dc:publisher'] ? (Array.isArray(metadata['dc:publisher']) ? metadata['dc:publisher'][0] : metadata['dc:publisher']) : null,
-      isbn: metadata['dc:identifier'] ? findISBN(metadata['dc:identifier']) : null,
-      pubDate: metadata['dc:date'] ? (Array.isArray(metadata['dc:date']) ? metadata['dc:date'][0] : metadata['dc:date']) : null,
-      language: metadata['dc:language'] ? (Array.isArray(metadata['dc:language']) ? metadata['dc:language'][0] : metadata['dc:language']) : null,
-      description: metadata['dc:description'] ? (Array.isArray(metadata['dc:description']) ? metadata['dc:description'][0] : metadata['dc:description']) : null,
-      coverPath: null,
-      bookPath: null
-    }
-    
-    // 提取封面图片
-    const manifest = opf.package.manifest[0].item
-    const spine = opf.package.spine[0]
-    
-    // 查找封面 ID
-    let coverId = null
-    if (metadata.meta) {
-      const coverMeta = Array.isArray(metadata.meta) ? metadata.meta.find(m => m.$ && m.$.name === 'cover') : null
-      if (coverMeta) {
-        coverId = coverMeta.$.content
-      }
-    }
-    
-    // 如果没有通过 meta 标签找到，尝试查找名为 'cover' 的项目
-    if (!coverId && manifest) {
-      const coverItem = Array.isArray(manifest) ? manifest.find(item => item.$.id === 'cover' || item.$.id === 'cover-image') : null
-      if (coverItem) {
-        coverId = coverItem.$.id
-      }
-    }
-    
-    // 提取封面图片
-    if (coverId && manifest) {
-      const coverItem = Array.isArray(manifest) ? manifest.find(item => item.$.id === coverId) : null
-      if (coverItem) {
-        const coverHref = coverItem.$.href
-        const coverPath = path.join(path.dirname(rootFilePath), coverHref).replace(/\\/g, '/')
-        const coverBuffer = zip.readFile(coverPath)
-        
-        if (coverBuffer) {
-          // 保存封面到用户数据目录
-          const userDataPath = app.getPath('userData')
-          const coverFileName = `cover_${Date.now()}.jpg`
-          const coverSavePath = path.join(userDataPath, 'upload', 'covers', coverFileName)
-          
-          // 创建 covers 文件夹
-          const coversDir = path.dirname(coverSavePath)
-          if (!fs.existsSync(coversDir)) {
-            fs.mkdirSync(coversDir, { recursive: true })
-          }
-          
-          fs.writeFileSync(coverSavePath, coverBuffer)
-          bookInfo.coverPath = path.join('upload', 'covers', coverFileName)
-          console.log('Cover saved to:', bookInfo.coverPath)
-        }
-      }
-    }
-    
-    // 复制 EPUB 文件到用户数据目录
+    // 1. 先复制 EPUB 文件到用户数据目录（确保即使元数据解析失败也能导入）
     const userDataPath = app.getPath('userData')
     const bookFileName = `book_${Date.now()}_${path.basename(filePath)}`
     const bookSavePath = path.join(userDataPath, 'upload', 'books', bookFileName)
     
-    // 创建 books 文件夹
     const booksDir = path.dirname(bookSavePath)
     if (!fs.existsSync(booksDir)) {
       fs.mkdirSync(booksDir, { recursive: true })
     }
     
-    // 复制文件
     fs.copyFileSync(filePath, bookSavePath)
-    bookInfo.bookPath = path.join('upload', 'books', bookFileName)
-    console.log('Book copied to:', bookInfo.bookPath)
+    const savedBookPath = path.join('upload', 'books', bookFileName)
     
-    console.log('Extracted metadata:', bookInfo)
+    // 2. 尝试解析 EPUB 元数据
+    const bookInfo = {
+      title: path.basename(filePath, '.epub'),
+      author: '未知作者',
+      publisher: null,
+      isbn: null,
+      pubDate: null,
+      language: null,
+      description: null,
+      coverPath: null,
+      bookPath: savedBookPath
+    }
+    
+    try {
+      const zip = new AdmZip(filePath)
+      
+      // 读取 container.xml 找到 content.opf 的位置
+      const containerXml = zip.readAsText('META-INF/container.xml')
+      if (!containerXml) {
+        throw new Error('Invalid EPUB: container.xml not found')
+      }
+      
+      const containerParser = new xml2js.Parser()
+      const container = await containerParser.parseStringPromise(containerXml)
+      const rootFilePath = container.container.rootfiles[0].rootfile[0].$['full-path']
+      
+      // 读取 content.opf 文件
+      const opfXml = zip.readAsText(rootFilePath)
+      if (!opfXml) {
+        throw new Error('Invalid EPUB: content.opf not found')
+      }
+      
+      const opfParser = new xml2js.Parser()
+      const opf = await opfParser.parseStringPromise(opfXml)
+      const metadata = opf.package.metadata[0]
+      
+      // 提取基本信息（确保 author 为字符串）
+      bookInfo.title = metadata['dc:title'] ? String(metadata['dc:title'][0]) : bookInfo.title
+      if (metadata['dc:creator']) {
+        const creator = Array.isArray(metadata['dc:creator']) ? metadata['dc:creator'][0] : metadata['dc:creator']
+        bookInfo.author = typeof creator === 'object' ? (creator._ || JSON.stringify(creator)) : String(creator || '未知作者')
+      }
+      bookInfo.publisher = metadata['dc:publisher'] ? String(Array.isArray(metadata['dc:publisher']) ? metadata['dc:publisher'][0] : metadata['dc:publisher']) : null
+      bookInfo.isbn = metadata['dc:identifier'] ? findISBN(metadata['dc:identifier']) : null
+      bookInfo.pubDate = metadata['dc:date'] ? String(Array.isArray(metadata['dc:date']) ? metadata['dc:date'][0] : metadata['dc:date']) : null
+      bookInfo.language = metadata['dc:language'] ? String(Array.isArray(metadata['dc:language']) ? metadata['dc:language'][0] : metadata['dc:language']) : null
+      bookInfo.description = metadata['dc:description'] ? String(Array.isArray(metadata['dc:description']) ? metadata['dc:description'][0] : metadata['dc:description']) : null
+      
+      // 提取封面图片
+      const manifest = opf.package.manifest[0].item
+      
+      // 查找封面 ID
+      let coverId = null
+      if (metadata.meta) {
+        const coverMeta = Array.isArray(metadata.meta) ? metadata.meta.find(m => m.$ && m.$.name === 'cover') : null
+        if (coverMeta) {
+          coverId = coverMeta.$.content
+        }
+      }
+      
+      if (!coverId && manifest) {
+        const coverItem = Array.isArray(manifest) ? manifest.find(item => item.$.id === 'cover' || item.$.id === 'cover-image') : null
+        if (coverItem) {
+          coverId = coverItem.$.id
+        }
+      }
+      
+      if (coverId && manifest) {
+        const coverItem = Array.isArray(manifest) ? manifest.find(item => item.$.id === coverId) : null
+        if (coverItem) {
+          const coverHref = coverItem.$.href
+          const coverPathInZip = path.join(path.dirname(rootFilePath), coverHref).replace(/\\/g, '/')
+          const coverBuffer = zip.readFile(coverPathInZip)
+          
+          if (coverBuffer) {
+            const coverFileName = `cover_${Date.now()}.jpg`
+            const coverSavePath = path.join(userDataPath, 'upload', 'covers', coverFileName)
+            
+            const coversDir = path.dirname(coverSavePath)
+            if (!fs.existsSync(coversDir)) {
+              fs.mkdirSync(coversDir, { recursive: true })
+            }
+            
+            fs.writeFileSync(coverSavePath, coverBuffer)
+            bookInfo.coverPath = path.join('upload', 'covers', coverFileName)
+          }
+        }
+      }
+    } catch (metaError) {
+      // 元数据解析失败，但文件已复制，使用默认值继续
+      console.warn('Metadata extraction failed, using defaults:', metaError.message)
+    }
+    
     return bookInfo
   } catch (error) {
-    console.error('Error extracting EPUB metadata:', error)
-    // 返回默认值
+    console.error('Error in extractEpubMetadata:', error)
     return {
       title: path.basename(filePath, '.epub'),
       author: '未知作者',
+      publisher: null,
+      isbn: null,
+      pubDate: null,
+      language: null,
+      description: null,
       coverPath: null,
       bookPath: null
     }
@@ -378,6 +388,7 @@ ipcMain.handle('open-epub', async () => {
       
       const addedBooks = []
       const skippedBooks = []
+      const failedFiles = []
       
       for (const filePath of result.filePaths) {
         console.log('Processing file:', filePath)
@@ -387,10 +398,10 @@ ipcMain.handle('open-epub', async () => {
           const fileHash = await generateFileHash(filePath)
           console.log('File hash:', fileHash)
           
-          // 检查书籍是否已存在（通过路径或 hash）
-          const existingBook = db.prepare('SELECT * FROM books WHERE book_path = ? OR file_hash = ?').get(filePath, fileHash)
+          // 检查书籍是否已存在（通过 hash）
+          const existingBook = db.prepare('SELECT * FROM books WHERE file_hash = ?').get(fileHash)
           if (existingBook) {
-            console.log('Book already exists (by path or hash), skipping:', filePath)
+            console.log('Book already exists (by hash), skipping:', filePath)
             skippedBooks.push(filePath)
             continue
           }
@@ -398,6 +409,12 @@ ipcMain.handle('open-epub', async () => {
           // 提取 EPUB 元数据
           const metadata = await extractEpubMetadata(filePath)
           console.log('Extracted metadata:', metadata)
+          
+          if (!metadata.bookPath) {
+            console.error('Failed to copy EPUB file, bookPath is null:', filePath)
+            failedFiles.push({ path: filePath, reason: '文件复制失败' })
+            continue
+          }
           
           // 保存到数据库（包含 hash）
           const stmt = db.prepare(`
@@ -427,17 +444,19 @@ ipcMain.handle('open-epub', async () => {
           }
         } catch (error) {
           console.error('Error processing file:', filePath, error)
+          failedFiles.push({ path: filePath, reason: error.message })
           // 继续处理下一个文件
         }
       }
       
-      console.log(`Added: ${addedBooks.length}, Skipped: ${skippedBooks.length}`)
+      console.log(`Added: ${addedBooks.length}, Skipped: ${skippedBooks.length}, Failed: ${failedFiles.length}`)
       
       // 返回添加的书籍列表和跳过的数量
       return {
         success: true,
         added: addedBooks,
         skipped: skippedBooks.length,
+        failed: failedFiles,
         total: result.filePaths.length
       }
     } else {
@@ -833,6 +852,125 @@ ipcMain.handle('open-reader-window', (event, book) => {
   } catch (error) {
     console.error('Error opening reader window:', error)
     return false
+  }
+})
+
+// 读取书籍文件为 base64
+ipcMain.handle('read-book-file', async (event, bookPath) => {
+  try {
+    const userDataPath = app.getPath('userData')
+    const filePath = path.join(userDataPath, bookPath)
+    
+    if (!fs.existsSync(filePath)) {
+      return { success: false, error: 'File not found: ' + filePath }
+    }
+    
+    const fileBuffer = fs.readFileSync(filePath)
+    const base64 = fileBuffer.toString('base64')
+    const fileName = path.basename(filePath)
+    
+    return { success: true, base64, fileName, size: fileBuffer.length }
+  } catch (error) {
+    console.error('Error reading book file:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+// 从云端下载书籍到本地
+ipcMain.handle('download-cloud-book', async (event, { downloadUrl, bookInfo, authToken }) => {
+  try {
+    console.log('Downloading cloud book:', downloadUrl)
+    
+    // 1. 下载文件
+    const fileBuffer = await new Promise((resolve, reject) => {
+      const http = require('http')
+      const url = new URL(downloadUrl)
+      const headers = {}
+      if (authToken) {
+        headers['Authorization'] = authToken.startsWith('Bearer ') ? authToken : `Bearer ${authToken}`
+      }
+      http.get({
+        hostname: url.hostname,
+        port: url.port,
+        path: url.pathname + url.search,
+        headers,
+      }, (res) => {
+        if (res.statusCode !== 200) {
+          reject(new Error(`Download failed: HTTP ${res.statusCode}`))
+          return
+        }
+        const chunks = []
+        res.on('data', chunk => chunks.push(chunk))
+        res.on('end', () => resolve(Buffer.concat(chunks)))
+        res.on('error', reject)
+      }).on('error', reject)
+    })
+    
+    console.log('Downloaded file size:', fileBuffer.length, 'bytes')
+    
+    // 2. 生成 hash 检查是否已存在
+    const hash = crypto.createHash('sha256').update(fileBuffer).digest('hex')
+    const existingBook = db.prepare('SELECT * FROM books WHERE file_hash = ?').get(hash)
+    if (existingBook) {
+      console.log('Book already exists locally:', existingBook.title)
+      return { success: false, error: '该书已在本地存在', book: existingBook }
+    }
+    
+    // 3. 保存文件到本地
+    const userDataPath = app.getPath('userData')
+    const booksDir = path.join(userDataPath, 'upload', 'books')
+    if (!fs.existsSync(booksDir)) {
+      fs.mkdirSync(booksDir, { recursive: true })
+    }
+    
+    const title = bookInfo.title || '未知书名'
+    const safeFileName = title.replace(/[<>:"/\\|?*]/g, '_').substring(0, 50)
+    const bookFileName = `book_${Date.now()}_${safeFileName}.epub`
+    const bookSavePath = path.join(booksDir, bookFileName)
+    fs.writeFileSync(bookSavePath, fileBuffer)
+    const savedBookPath = path.join('upload', 'books', bookFileName)
+    console.log('Book saved to:', savedBookPath)
+    
+    // 4. 提取元数据
+    const metadata = await extractEpubMetadata(bookSavePath)
+    // 使用云端信息覆盖（如果本地元数据缺失）
+    if (bookInfo.title) metadata.title = bookInfo.title
+    if (bookInfo.author && bookInfo.author !== '未知作者') metadata.author = bookInfo.author
+    if (bookInfo.publisher) metadata.publisher = bookInfo.publisher
+    if (bookInfo.isbn) metadata.isbn = bookInfo.isbn
+    if (bookInfo.pubDate) metadata.pubDate = bookInfo.pubDate
+    if (bookInfo.language) metadata.language = bookInfo.language
+    if (bookInfo.description) metadata.description = bookInfo.description
+    metadata.bookPath = savedBookPath
+    
+    // 5. 插入数据库
+    const stmt = db.prepare(`
+      INSERT INTO books (title, author, publisher, isbn, pub_date, language, description, cover_path, book_path, file_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    const insertResult = stmt.run(
+      metadata.title,
+      metadata.author,
+      metadata.publisher || null,
+      metadata.isbn || null,
+      metadata.pubDate || null,
+      metadata.language || null,
+      metadata.description || null,
+      metadata.coverPath || null,
+      metadata.bookPath,
+      hash
+    )
+    
+    if (insertResult.changes > 0) {
+      const book = db.prepare('SELECT * FROM books WHERE id = ?').get(insertResult.lastInsertRowid)
+      console.log('Book downloaded and saved:', book.title)
+      return { success: true, book }
+    } else {
+      return { success: false, error: '插入数据库失败' }
+    }
+  } catch (error) {
+    console.error('Error downloading cloud book:', error)
+    return { success: false, error: error.message }
   }
 })
 

@@ -71,7 +71,9 @@ export const useBookStore = defineStore('book', () => {
       const result = await window.electronAPI.openEpub()
       
       if (result && result.success) {
-        await loadBooks()
+        // 重新加载书籍和分类列表
+        await loadCategories()
+        await loadBooks(currentCategory.value)
         
         // 显示添加结果
         if (result.added.length > 0) {
@@ -79,11 +81,24 @@ export const useBookStore = defineStore('book', () => {
           if (result.skipped > 0) {
             message += `，跳过 ${result.skipped} 本已存在的书籍`
           }
+          if (result.failed && result.failed.length > 0) {
+            message += `，失败 ${result.failed.length} 本`
+          }
+          alert(message)
+        } else if (result.skipped > 0) {
+          alert(`所有 ${result.skipped} 本书籍已存在，无需重复添加`)
+        } else if (result.failed && result.failed.length > 0) {
+          const reasons = result.failed.map(f => `${f.path.split(/[\\/]/).pop()}: ${f.reason}`).join('\n')
+          alert(`导入失败 ${result.failed.length} 本书籍：\n${reasons}`)
+        } else {
+          alert('未导入任何书籍')
         }
         
         return result
+      } else {
+        // 用户取消了文件选择，不需要提示
+        return null
       }
-      return null
     } catch (error) {
       console.error('❌ Failed to open EPUB:', error)
       console.error('Error details:', error.message, error.stack)

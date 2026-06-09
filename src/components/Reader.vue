@@ -319,6 +319,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useBookStore } from '../stores/bookStore'
 import ePub from 'epubjs'
 import { buildFileUrl } from '../utils/pathHelper'
+import { authFetch } from '../utils/httpHelper'
 
 const props = defineProps({
   book: {
@@ -764,12 +765,39 @@ function handleThumbMouseDown(event) {
 async function saveProgress() {
   const location = rendition.currentLocation()
   if (location && location.start) {
-    await bookStore.saveProgress({
+    const progressData = {
       bookId: props.book.id,
       cfi: location.start.cfi,
       page: location.start.displayed.page,
       percentage: location.start.percentage
+    }
+    
+    // 保存到本地数据库
+    await bookStore.saveProgress(progressData)
+    
+    // 同步到云端（静默失败，不影响本地保存）
+    syncProgressToCloud(progressData)
+  }
+}
+
+// 同步阅读进度到云端
+async function syncProgressToCloud(progressData) {
+  const token = localStorage.getItem('auth_token_full') || localStorage.getItem('auth_token')
+  if (!token) return  // 未登录，跳过云端同步
+  
+  try {
+    const response = await authFetch('http://localhost:8080/api/sync/progress', {
+      method: 'POST',
+      body: JSON.stringify({
+        bookId: progressData.bookId,
+        cfi: progressData.cfi,
+        page: progressData.page,
+        percentage: progressData.percentage
+      })
     })
+    // 不处理响应，静默失败
+  } catch (e) {
+    // 云端同步失败不影响本地使用，忽略错误
   }
 }
 

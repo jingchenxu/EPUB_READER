@@ -1073,8 +1073,8 @@ body {
 .search-drawer {
   position: fixed;
   top: 0;
-  right: -400px;  /* 默认隐藏在右侧外面 */
-  width: 400px;
+  right: -320px;  /* 默认隐藏在右侧外面 */
+  width: 320px;
   height: 100vh;
   background: white;
   box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
@@ -1089,7 +1089,7 @@ body {
 }
 
 .search-drawer-header {
-  padding: 20px;
+  padding: 14px 20px;
   border-bottom: 1px solid #e0e0e0;
   display: flex;
   justify-content: space-between;
@@ -1098,7 +1098,8 @@ body {
 
 .search-drawer-header h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: 14px;
+  font-weight: normal;
   color: #2c3e50;
 }
 
@@ -1128,7 +1129,7 @@ body {
 .search-input {
   width: 100%;
   padding: 12px 16px;
-  border: 2px solid #ddd;
+  border: 1px solid #ddd;
   border-radius: 8px;
   font-size: 14px;
   outline: none;

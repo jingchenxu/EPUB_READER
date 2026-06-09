@@ -169,6 +169,15 @@
               <h2>云端存储</h2>
               <span class="cloud-space-info">共 {{ formatSize(cloudTotalSpace) }}，已使用 {{ formatSize(cloudUsedSpace) }}</span>
             </div>
+            <div class="cloud-header-right">
+              <button class="btn-refresh" :class="{ spinning: cloudRefreshing }" @click="handleRefreshCloud" :disabled="cloudRefreshing" title="刷新数据">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="23 4 23 10 17 10"/>
+                  <polyline points="1 20 1 14 7 14"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+              </button>
+            </div>
           </div>
 
           <div class="cloud-table-wrapper">
@@ -189,10 +198,39 @@
                     <span :class="book.downloaded ? 'status-yes' : 'status-no'">{{ book.downloaded ? '是' : '否' }}</span>
                   </td>
                   <td>{{ book.category || '未分类' }}</td>
-                  <td>{{ book.lastRead || '未阅读' }}</td>
+                  <td>
+                    <span v-if="book.lastRead" class="last-read-info">{{ book.lastRead }}</span>
+                    <span v-else class="last-read-empty">未阅读</span>
+                  </td>
                   <td class="cloud-actions">
-                    <button class="btn-cloud-read" @click="handleCloudRead(book)">阅读</button>
-                    <button class="btn-cloud-delete" @click="handleCloudDelete(book)">删除</button>
+                    <button 
+                      v-if="!book.downloaded" 
+                      class="btn-cloud-download" 
+                      :disabled="downloadingBookIds.has(book.id)"
+                      @click="handleCloudDownload(book)"
+                      :title="downloadingBookIds.has(book.id) ? '下载中...' : '下载'"
+                    >
+                      <svg v-if="downloadingBookIds.has(book.id)" class="icon-spinning" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12a9 9 0 11-6.219-8.56"/>
+                      </svg>
+                      <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                      </svg>
+                    </button>
+                    <button class="btn-cloud-read" @click="handleCloudRead(book)" title="阅读">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+                        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+                      </svg>
+                    </button>
+                    <button class="btn-cloud-delete" @click="handleCloudDelete(book)" title="删除">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                      </svg>
+                    </button>
                   </td>
                 </tr>
                 <tr v-if="cloudBooks.length === 0">
@@ -276,6 +314,36 @@
                 </div>
               </div>
               <div class="book-badge" v-if="book.added_at">{{ getAddedTime(book.added_at) }}</div>
+              <!-- 云存储状态图标（仅登录后显示） -->
+              <div 
+                v-if="isLoggedIn" 
+                class="cloud-sync-icon" 
+                :class="{ 
+                  'synced': isBookSyncedToCloud(book), 
+                  'syncing': isBookSyncing(book) 
+                }"
+                :title="isBookSyncedToCloud(book) ? '已同步到云端' : (isBookSyncing(book) ? '正在同步...' : '点击同步到云端')"
+                @click="syncBookToCloud(book, $event)"
+              >
+                <!-- 同步中 - 旋转箭头 -->
+                <svg v-if="isBookSyncing(book)" class="cloud-svg spinning" width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                  <path d="M12 2c5.52 0 10 4.48 10 10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity="0.3"/>
+                  <polygon points="22 8 22 2 16 2" fill="currentColor" opacity="0.3"/>
+                  <polygon points="2 16 2 22 8 22" fill="currentColor"/>
+                </svg>
+                <!-- 已同步 - 云+勾 -->
+                <svg v-else-if="isBookSyncedToCloud(book)" class="cloud-svg" width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" fill="currentColor" opacity="0.15" stroke="currentColor" stroke-width="1.5"/>
+                  <polyline points="8 13 10.5 15.5 16 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <!-- 未同步 - 云+箭头 -->
+                <svg v-else class="cloud-svg" width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" stroke="currentColor" stroke-width="1.5"/>
+                  <line x1="12" y1="10" x2="12" y2="16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <polyline points="9.5 12.5 12 10 14.5 12.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
             </div>
             <div class="book-title" :title="book.title">{{ book.title }}</div>
           </div>
@@ -409,6 +477,7 @@
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useBookStore } from '../stores/bookStore'
 import { buildFileUrl } from '../utils/pathHelper'
+import { authFetch, createAuthHeaders, getAuthToken } from '../utils/httpHelper'
 
 const bookStore = useBookStore()
 const books = computed(() => bookStore.books)
@@ -537,7 +606,11 @@ function getAddedTime(addedAt) {
 }
 
 async function handleOpenEpub() {
-  await bookStore.openEpub()
+  const result = await bookStore.openEpub()
+  // 导入成功后，如果已登录，刷新云端书籍列表
+  if (result && result.success && isLoggedIn.value) {
+    await fetchCloudBooks()
+  }
 }
 
 function handleReadBook(book) {
@@ -693,17 +766,21 @@ async function handleLogin() {
     
     const data = await response.json()
     
-    if (data.token) {
+    if (data.success && data.data) {
+      const { token, type, username: respUsername } = data.data
+      
       // 登录成功，保存 token 和用户名
-      authToken.value = data.token
-      username.value = loginForm.value.username
+      authToken.value = token
+      username.value = respUsername || loginForm.value.username
       isLoggedIn.value = true
       
-      // 将 token 缓存到 localStorage
-      localStorage.setItem('auth_token', data.token)
-      localStorage.setItem('username', loginForm.value.username)
+      // 将 token 缓存到 localStorage（含 Bearer 类型）
+      const fullToken = type ? `${type} ${token}` : token
+      localStorage.setItem('auth_token', token)
+      localStorage.setItem('auth_token_full', fullToken)
+      localStorage.setItem('username', respUsername || loginForm.value.username)
       
-      alert('登录成功！')
+      // 关闭登录对话框
       showLoginDialog.value = false
       
       // 清空表单
@@ -711,11 +788,13 @@ async function handleLogin() {
         username: '',
         password: ''
       }
+      
+      // 登录成功后获取云端书籍列表
+      await fetchCloudBooks()
     } else {
-      alert('登录失败：' + (data.message || '未知错误'))
+      alert('登录失败：' + (data.message || data.msg || '用户名或密码错误'))
     }
   } catch (error) {
-    console.error('Login error:', error)
     alert('登录失败：' + error.message)
   }
 }
@@ -737,14 +816,12 @@ const cloudUsedSpace = computed(() => {
 })
 const cloudCurrentPage = ref(1)
 const cloudPageSize = 10
-const cloudBooks = ref([
-  { id: 1, title: '第一性原理：21堂科学通识课', downloaded: true, category: '科学', lastRead: '2026-05-30', size: 3500000 },
-  { id: 2, title: '极简资治通鉴', downloaded: true, category: '历史', lastRead: '2026-05-28', size: 5200000 },
-  { id: 3, title: '一本书看透股权架构', downloaded: false, category: '经管', lastRead: '2026-05-25', size: 2800000 },
-  { id: 4, title: '逻辑学入门：清晰思考、理性生活的88个逻辑学常识', downloaded: false, category: '哲学', lastRead: '未阅读', size: 4100000 },
-  { id: 5, title: '大师讲透王阳明（套装共12册）', downloaded: true, category: '哲学', lastRead: '2026-05-20', size: 8900000 },
-  { id: 6, title: '高效论证：美国大学最实用的逻辑训练课', downloaded: false, category: '哲学', lastRead: '2026-05-18', size: 3200000 },
-])
+const cloudBooks = ref([])  // 云端书籍列表，从 API 获取
+const cloudBookTitles = computed(() => new Set(cloudBooks.value.map(b => b.title)))  // 云端书籍标题集合
+const syncingBookIds = ref(new Set())  // 正在同步的书籍 ID
+const cloudSyncedTitles = ref(new Set())  // 已同步到云端的书籍标题
+const cloudRefreshing = ref(false)  // 是否正在刷新云端数据
+const downloadingBookIds = ref(new Set())  // 正在下载的书籍 ID
 const cloudTotalPages = computed(() => Math.ceil(cloudBooks.value.length / cloudPageSize))
 const paginatedCloudBooks = computed(() => {
   const start = (cloudCurrentPage.value - 1) * cloudPageSize
@@ -752,6 +829,11 @@ const paginatedCloudBooks = computed(() => {
 })
 
 function openCloudStorage() {
+  // 未登录时弹出登录框
+  if (!isLoggedIn.value) {
+    showLoginDialog.value = true
+    return
+  }
   showCloudStorage.value = true
   showSettings.value = false
   cloudCurrentPage.value = 1
@@ -761,16 +843,73 @@ function closeCloudStorage() {
   showCloudStorage.value = false
 }
 
+// 刷新云端数据
+async function handleRefreshCloud() {
+  if (cloudRefreshing.value) return
+  cloudRefreshing.value = true
+  try {
+    await fetchCloudBooks()
+  } finally {
+    cloudRefreshing.value = false
+  }
+}
+
 function handleCloudRead(book) {
-  if (book.downloaded) {
-    const localBook = filteredBooks.value.find(b => b.title.includes(book.title.substring(0, 6)))
+  if (book.downloaded && book.localBookId) {
+    const localBook = books.value.find(b => b.id === book.localBookId)
     if (localBook) {
       handleReadBook(localBook)
     } else {
-      alert('本地未找到该书籍，请先下载')
+      alert('本地未找到该书籍，请重新导入')
     }
   } else {
     alert('该书籍未下载到本地，请先下载后阅读')
+  }
+}
+
+// 从云端下载书籍到本地
+async function handleCloudDownload(book) {
+  if (downloadingBookIds.value.has(book.id)) return
+  
+  downloadingBookIds.value = new Set([...downloadingBookIds.value, book.id])
+  try {
+    // 构建下载 URL - 使用新的下载接口
+    const downloadUrl = `http://localhost:8080/api/books/${book.id}/download`
+    const authToken = getAuthToken()
+    
+    const result = await window.electronAPI.downloadCloudBook(downloadUrl, {
+      title: book.title,
+      author: book.author,
+      publisher: book.publisher,
+      isbn: book.isbn,
+      pubDate: book.pubDate,
+      language: book.language,
+      description: book.description
+    }, authToken)
+    
+    if (result.success) {
+      alert(`《${book.title}》下载成功！`)
+      // 更新本地状态
+      book.downloaded = true
+      book.localBookId = result.book.id
+      // 重新加载书籍列表和云端数据
+      await bookStore.loadBooks(bookStore.currentCategory)
+      await fetchCloudBooks()
+    } else {
+      alert('下载失败：' + (result.error || '未知错误'))
+      if (result.book) {
+        // 已存在的情况，刷新云端数据
+        book.downloaded = true
+        book.localBookId = result.book.id
+      }
+    }
+  } catch (error) {
+    console.error('Download failed:', error)
+    alert('下载失败：' + error.message)
+  } finally {
+    const newSet = new Set(downloadingBookIds.value)
+    newSet.delete(book.id)
+    downloadingBookIds.value = newSet
   }
 }
 
@@ -779,6 +918,165 @@ function handleCloudDelete(book) {
   const idx = cloudBooks.value.findIndex(b => b.id === book.id)
   if (idx !== -1) {
     cloudBooks.value.splice(idx, 1)
+  }
+}
+
+// 云端同步相关函数
+// 检查书籍是否已同步到云端
+function isBookSyncedToCloud(book) {
+  return cloudSyncedTitles.value.has(book.title)
+}
+
+// 检查书籍是否正在同步中
+function isBookSyncing(book) {
+  return syncingBookIds.value.has(book.id)
+}
+
+// 获取云端书籍列表
+async function fetchCloudBooks() {
+  if (!isLoggedIn.value) return
+  
+  try {
+    const response = await authFetch('http://localhost:8080/api/books')
+    const data = await response.json()
+    
+    if (data.success && Array.isArray(data.data)) {
+      // 用本地数据丰富云端书籍信息
+      const enrichedBooks = []
+      for (const cloudBook of data.data) {
+        const enriched = { ...cloudBook }
+        // 通过书名匹配本地书籍
+        const localBook = books.value.find(b => b.title === cloudBook.title)
+        if (localBook) {
+          enriched.downloaded = true
+          enriched.localBookId = localBook.id
+          // 获取分类名称
+          if (localBook.category_id) {
+            const cat = categories.value.find(c => c.id === localBook.category_id)
+            enriched.category = cat ? cat.name : '未分类'
+          } else {
+            enriched.category = '未分类'
+          }
+          // 获取最后阅读时间和进度
+          try {
+            const progress = await window.electronAPI.getProgress(localBook.id)
+            if (localBook.last_read_at) {
+              const dateStr = new Date(localBook.last_read_at).toLocaleString('zh-CN', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit'
+              })
+              if (progress && progress.percentage > 0) {
+                enriched.lastRead = `${dateStr} (${Math.round(progress.percentage * 100)}%)`
+              } else {
+                enriched.lastRead = dateStr
+              }
+            } else {
+              enriched.lastRead = ''
+            }
+          } catch (e) {
+            enriched.lastRead = localBook.last_read_at ? new Date(localBook.last_read_at).toLocaleDateString('zh-CN') : ''
+          }
+        } else {
+          enriched.downloaded = false
+          enriched.category = '未分类'
+          enriched.lastRead = ''
+        }
+        enrichedBooks.push(enriched)
+      }
+      cloudBooks.value = enrichedBooks
+      cloudSyncedTitles.value = new Set(data.data.map(b => b.title))
+    }
+  } catch (error) {
+    console.error('Failed to fetch cloud books:', error)
+  }
+}
+
+// 同步书籍到云端
+async function syncBookToCloud(book, event) {
+  // 阻止事件冒泡，避免触发卡片点击
+  if (event) {
+    event.stopPropagation()
+    event.preventDefault()
+  }
+  
+  // 未登录不能同步
+  if (!isLoggedIn.value) {
+    alert('请先登录后再同步到云端')
+    return
+  }
+  
+  // 验证书名
+  if (!book.title) {
+    alert('书籍标题为空，无法同步')
+    return
+  }
+  
+  // 已同步或正在同步，不重复操作
+  if (isBookSyncedToCloud(book) || isBookSyncing(book)) return
+  
+  // 标记为正在同步
+  syncingBookIds.value = new Set([...syncingBookIds.value, book.id])
+  
+  try {
+    // 1. 从本地读取 EPUB 文件
+    const fileResult = await window.electronAPI.readBookFile(book.book_path)
+    if (!fileResult.success) {
+      alert('读取书籍文件失败：' + fileResult.error)
+      return
+    }
+    
+    // 2. 将 base64 转换为 File 对象
+    const byteCharacters = atob(fileResult.base64)
+    const byteNumbers = new Array(byteCharacters.length)
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i)
+    }
+    const byteArray = new Uint8Array(byteNumbers)
+    const blob = new Blob([byteArray], { type: 'application/epub+zip' })
+    const file = new File([blob], fileResult.fileName, { type: 'application/epub+zip' })
+    
+    // 3. 构建 FormData - 将所有字段平铺发送
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('title', book.title)
+    formData.append('author', book.author || '')
+    formData.append('publisher', book.publisher || '')
+    formData.append('isbn', book.isbn || '')
+    formData.append('pubDate', book.pub_date || '')
+    formData.append('language', book.language || '')
+    formData.append('description', book.description || '')
+    formData.append('coverPath', book.cover_path || '')
+    formData.append('bookPath', book.book_path || '')
+    
+    // 4. 发送请求
+    const headers = createAuthHeaders()
+    delete headers.headers['Content-Type']
+    
+    const response = await fetch('http://localhost:8080/api/books/sync', {
+      method: 'POST',
+      headers: headers.headers,
+      body: formData
+    })
+    
+    const data = await response.json()
+    
+    if (data.success) {
+      // 同步成功，更新状态
+      cloudSyncedTitles.value = new Set([...cloudSyncedTitles.value, book.title])
+      // 重新获取云端书籍列表
+      await fetchCloudBooks()
+      alert(`《${book.title}》已成功同步到云端`)
+    } else {
+      alert('同步失败：' + (data.message || '未知错误'))
+    }
+  } catch (error) {
+    console.error('Failed to sync book to cloud:', error)
+    alert('同步失败：' + error.message)
+  } finally {
+    // 移除同步中状态
+    const newSet = new Set(syncingBookIds.value)
+    newSet.delete(book.id)
+    syncingBookIds.value = newSet
   }
 }
 
@@ -859,6 +1157,11 @@ onMounted(async () => {
     // 加载分类和书籍
     await bookStore.loadCategories()
     await bookStore.loadBooks(null)
+    
+    // 如果已登录，获取云端书籍列表
+    if (isLoggedIn.value) {
+      await fetchCloudBooks()
+    }
   } catch (error) {
     console.error('Failed to get paths:', error)
   }
@@ -1250,6 +1553,72 @@ function handleImageError(event) {
   border-radius: 4px;
   font-size: 11px;
   font-weight: 500;
+}
+
+/* 云存储状态图标 */
+.cloud-sync-icon {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  opacity: 0.75;
+  backdrop-filter: blur(4px);
+}
+
+.cloud-sync-icon:hover {
+  opacity: 1;
+  transform: scale(1.12);
+  background: white;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.18);
+}
+
+.cloud-sync-icon .cloud-svg {
+  color: #aaa;
+  transition: color 0.2s ease;
+}
+
+.cloud-sync-icon.synced {
+  background: rgba(56, 161, 105, 0.12);
+  opacity: 1;
+  box-shadow: 0 1px 4px rgba(56, 161, 105, 0.2);
+}
+
+.cloud-sync-icon.synced:hover {
+  background: rgba(56, 161, 105, 0.18);
+  box-shadow: 0 3px 8px rgba(56, 161, 105, 0.25);
+}
+
+.cloud-sync-icon.synced .cloud-svg {
+  color: #38A169;
+}
+
+.cloud-sync-icon.syncing {
+  background: rgba(66, 153, 225, 0.12);
+  cursor: wait;
+  opacity: 1;
+  box-shadow: 0 1px 4px rgba(66, 153, 225, 0.2);
+}
+
+.cloud-sync-icon.syncing .cloud-svg {
+  color: #4299E1;
+}
+
+.cloud-sync-icon.syncing .cloud-svg.spinning {
+  animation: spin 1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .book-title {
@@ -1770,6 +2139,44 @@ function handleImageError(event) {
   margin-left: 8px;
 }
 
+.cloud-header-right {
+  display: flex;
+  align-items: center;
+}
+
+.btn-refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #e0e0e0;
+  background: white;
+  cursor: pointer;
+  color: #555;
+  transition: all 0.2s ease;
+}
+
+.btn-refresh:hover {
+  background: #f5f5f5;
+  border-color: #4a90d9;
+  color: #4a90d9;
+}
+
+.btn-refresh:active {
+  transform: scale(0.92);
+}
+
+.btn-refresh.spinning {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.btn-refresh.spinning svg {
+  animation: spin 0.8s linear infinite;
+}
+
 .cloud-table-wrapper {
   background: white;
   border-radius: 8px;
@@ -1822,19 +2229,33 @@ function handleImageError(event) {
   color: #ccc;
 }
 
+.last-read-info {
+  color: #555;
+  font-size: 13px;
+}
+
+.last-read-empty {
+  color: #ccc;
+}
+
 .cloud-actions {
   display: flex;
   gap: 8px;
 }
 
 .btn-cloud-read,
-.btn-cloud-delete {
-  padding: 4px 12px;
+.btn-cloud-delete,
+.btn-cloud-download {
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border-radius: 4px;
   border: 1px solid #e0e0e0;
   background: white;
   cursor: pointer;
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: all 0.2s;
 }
 
@@ -1846,6 +2267,28 @@ function handleImageError(event) {
 .btn-cloud-read:hover {
   background: #667eea;
   color: white;
+}
+
+.btn-cloud-download {
+  color: #27ae60;
+  border-color: #27ae60;
+}
+
+.btn-cloud-download:hover {
+  background: #27ae60;
+  color: white;
+}
+
+.btn-cloud-download:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: #f5f5f5;
+  color: #999;
+  border-color: #ddd;
+}
+
+.icon-spinning {
+  animation: spin 1s linear infinite;
 }
 
 .btn-cloud-delete {

@@ -1,47 +1,80 @@
 /**
- * HTTP 请求工具函数
- * 自动在请求头中添加认证 token
+ * HTTP request helpers.
+ * Adds auth headers and logs the user out when protected API calls fail.
  */
 
-/**
- * 获取存储的 auth token
- */
+let logoutCallback = null
+let isLoggingOut = false
+
+export function setLogoutCallback(callback) {
+  logoutCallback = callback
+}
+
 export function getAuthToken() {
   return localStorage.getItem('auth_token_full') || localStorage.getItem('auth_token')
 }
 
-/**
- * 创建带有认证头的 fetch 请求配置
- * @param {Object} options - fetch 选项
- * @returns {Object} - 包含认证头的配置对象
- */
+function triggerLogout() {
+  if (isLoggingOut || !getAuthToken()) return
+
+  isLoggingOut = true
+  try {
+    if (logoutCallback) {
+      logoutCallback()
+    } else {
+      localStorage.removeItem('auth_token')
+      localStorage.removeItem('auth_token_full')
+      localStorage.removeItem('username')
+    }
+  } finally {
+    setTimeout(() => {
+      isLoggingOut = false
+    }, 0)
+  }
+}
+
 export function createAuthHeaders(options = {}) {
   const token = getAuthToken()
-  
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
+
   const headers = {
-    'Content-Type': 'application/json',
     ...options.headers
   }
-  
-  // 如果有 token，添加到请求头
-  if (token) {
-    // 如果 token 已包含类型前缀（如 "Bearer xxx"），直接使用；否则添加 "Bearer" 前缀
-    headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`
+
+  if (!isFormData && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json'
   }
-  
+
+  if (token) {
+    headers.Authorization = token.startsWith('Bearer ') ? token : `Bearer ${token}`
+  }
+
   return {
     ...options,
     headers
   }
 }
 
-/**
- * 带认证的 fetch 请求封装
- * @param {string} url - 请求 URL
- * @param {Object} options - fetch 选项
- * @returns {Promise<Response>} - fetch 响应
- */
+export async function checkAuthError(response) {
+  if (response.status === 401 || response.status === 403) {
+    triggerLogout()
+  }
+}
+
 export async function authFetch(url, options = {}) {
   const authOptions = createAuthHeaders(options)
-  return fetch(url, authOptions)
+
+  try {
+    const response = await fetch(url, authOptions)
+    await checkAuthError(response)
+
+    if (response.status >= 500) {
+      triggerLogout()
+    }
+
+    return response
+  } catch (error) {
+    triggerLogout()
+    throw error
+  }
 }

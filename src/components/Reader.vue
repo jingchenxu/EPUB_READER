@@ -148,6 +148,7 @@
             <div class="settings-dropdown-item">
               <label>阅读区域最大宽度（滚动模式）</label>
               <select v-model="maxReaderWidth" @change="changeMaxReaderWidth(maxReaderWidth)" class="mode-select mode-select-small">
+                <option :value="600">600px</option>
                 <option :value="800">800px</option>
                 <option :value="1000">1000px</option>
                 <option :value="1200">1200px</option>
@@ -343,7 +344,7 @@ const fontSize = ref(16)
 const fontFamily = ref('')  // 空字符串表示使用默认字体
 const isBold = ref(false)  // 文字加粗
 const lineHeight = ref(1.5)  // 行间距
-const maxReaderWidth = ref(800)  // 阅读区域最大宽度
+const maxReaderWidth = ref(600)  // 阅读区域最大宽度
 const textSelectionMenu = ref('right')  // 文字划选菜单: 'auto' | 'right' | 'disabled'
 const isDarkMode = ref(false)
 const progressBarRef = ref(null)
@@ -376,6 +377,210 @@ const annotations = ref([])  // 批注列表
 
 let rendition = null
 let epubBook = null
+let chapterScrollElement = null
+let isAutoChapterNavigating = false
+let removeChapterScrollListener = null
+let lastAutoChapterNavigationAt = 0
+let suppressWheelUntil = 0
+
+function hasRenderedContent() {
+  const viewer = document.getElementById('viewer')
+  const iframe = viewer?.querySelector('iframe')
+  return Boolean(iframe)
+}
+
+async function displayBook(target, timeoutMs, message) {
+  let displayError = null
+  Promise.resolve()
+    .then(() => (target ? rendition.display(target) : rendition.display()))
+    .catch((error) => {
+      displayError = error
+    })
+
+  const start = Date.now()
+  while (!hasRenderedContent() && Date.now() - start < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+
+  if (displayError) {
+    throw displayError
+  }
+
+  if (!hasRenderedContent()) {
+    throw new Error(message)
+  }
+}
+
+function getCurrentLocationSafe() {
+  if (!rendition) return null
+
+  try {
+    return rendition.currentLocation()
+  } catch (error) {
+    console.warn('Failed to get current location:', error)
+    return null
+  }
+}
+
+function createRenderOptions() {
+  const options = {
+    width: '100%',
+    height: '100%',
+    flow: readMode.value === 'scrolled' ? 'scrolled-doc' : 'paginated',
+    spread: 'none',
+    minSpreadWidth: 0,
+    ignoreClass: ''
+  }
+
+  if (readMode.value === 'scrolled') {
+    options.overflow = 'auto'
+    options.snap = false
+  }
+
+  return options
+}
+
+function getChapterScrollElement() {
+  const viewer = document.getElementById('viewer')
+  const iframe = viewer?.querySelector('iframe')
+  const iframeDoc = iframe?.contentDocument
+
+  return iframeDoc?.scrollingElement || iframeDoc?.documentElement || iframeDoc?.body || viewer
+}
+
+function clearChapterScrollNavigation() {
+  if (removeChapterScrollListener) {
+    removeChapterScrollListener()
+    removeChapterScrollListener = null
+  }
+  chapterScrollElement = null
+}
+
+function setupChapterScrollNavigation(scrollToEnd = false) {
+  clearChapterScrollNavigation()
+
+  if (readMode.value !== 'scrolled') return
+
+  requestAnimationFrame(() => {
+    const scrollElement = getChapterScrollElement()
+    if (!scrollElement) return
+
+    chapterScrollElement = scrollElement
+
+    if (scrollToEnd) {
+      scrollElement.scrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight)
+    }
+
+    let lastScrollTop = scrollElement.scrollTop
+
+    const navigateChapter = (toPrevious) => {
+      if (isAutoChapterNavigating || readMode.value !== 'scrolled') return
+      if (Date.now() - lastAutoChapterNavigationAt < 900) return
+
+      isAutoChapterNavigating = true
+      lastAutoChapterNavigationAt = Date.now()
+      suppressWheelUntil = Date.now() + 350
+      const navigation = toPrevious ? rendition.prev() : rendition.next()
+
+      Promise.resolve(navigation)
+        .then(() => {
+          setupChapterScrollNavigation(toPrevious)
+        })
+        .catch((error) => {
+          console.warn('Failed to auto navigate chapter:', error)
+        })
+        .finally(() => {
+          setTimeout(() => {
+            isAutoChapterNavigating = false
+          }, 150)
+        })
+    }
+
+    const onScroll = () => {
+      if (isAutoChapterNavigating || readMode.value !== 'scrolled') return
+
+      const { scrollTop, scrollHeight, clientHeight } = scrollElement
+      if (scrollHeight <= clientHeight + 4) return
+
+      const scrollingDown = scrollTop > lastScrollTop
+      const scrollingUp = scrollTop < lastScrollTop
+      lastScrollTop = scrollTop
+
+      // 只有滚动到真正底部（5px以内）才触发章节切换
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 5
+      const atTop = scrollTop <= 0
+
+      if (!(atBottom && scrollingDown) && !(atTop && scrollingUp)) return
+
+      navigateChapter(atTop)
+    }
+
+    const onWheel = (event) => {
+      if (readMode.value !== 'scrolled') return
+
+      if (isAutoChapterNavigating || Date.now() < suppressWheelUntil) {
+        event.preventDefault()
+        return
+      }
+
+      const { scrollTop, scrollHeight, clientHeight } = scrollElement
+      const noScrollableContent = scrollHeight <= clientHeight + 4
+      // 必须完全无法继续滚动（0px余量）才拦截滚轮
+      const atExactBottom = scrollTop + clientHeight >= scrollHeight - 2
+      const atExactTop = scrollTop <= 0
+
+      if (event.deltaY > 0 && (atExactBottom || noScrollableContent)) {
+        event.preventDefault()
+        navigateChapter(false)
+      } else if (event.deltaY < 0 && (atExactTop || noScrollableContent)) {
+        event.preventDefault()
+        navigateChapter(true)
+      }
+    }
+
+    scrollElement.addEventListener('scroll', onScroll, { passive: true })
+    scrollElement.addEventListener('wheel', onWheel, { passive: false })
+    removeChapterScrollListener = () => {
+      scrollElement.removeEventListener('scroll', onScroll)
+      scrollElement.removeEventListener('wheel', onWheel)
+    }
+  })
+}
+
+function applyReaderWidth() {
+  const viewer = document.getElementById('viewer')
+  if (!viewer) return
+
+  viewer.style.setProperty('max-width', maxReaderWidth.value + 'px', 'important')
+
+  requestAnimationFrame(() => {
+    const width = viewer.clientWidth
+    const height = viewer.clientHeight
+
+    if (!width || !height) return
+
+    const epubContainer = viewer.querySelector('.epub-container, [id^="epubjs-container"]')
+    const iframe = viewer.querySelector('iframe')
+
+    if (epubContainer) {
+      epubContainer.style.setProperty('width', width + 'px', 'important')
+      epubContainer.style.setProperty('height', height + 'px', 'important')
+    }
+
+    if (iframe) {
+      iframe.style.setProperty('width', width + 'px', 'important')
+      iframe.style.setProperty('height', height + 'px', 'important')
+    }
+
+    if (rendition) {
+      try {
+        rendition.resize(width, height)
+      } catch (error) {
+        console.warn('Failed to resize rendition:', error)
+      }
+    }
+  })
+}
 
 onMounted(async () => {
   await initReader()
@@ -387,6 +592,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  clearChapterScrollNavigation()
   if (rendition) {
     rendition.destroy()
   }
@@ -401,19 +607,12 @@ onUnmounted(() => {
 })
 
 // 监听 maxReaderWidth 变化，自动应用
-watch(maxReaderWidth, (newValue) => {
-  const viewer = document.getElementById('viewer')
-  if (viewer) {
-    viewer.style.setProperty('max-width', newValue + 'px', 'important')
-  }
+watch(maxReaderWidth, () => {
+  applyReaderWidth()
 })
 
 function handleResize() {
-  // 固定列宽模式下，不需要重新调整
-  // 如果需要响应式，可以取消下面的注释
-  // if (rendition) {
-  //   rendition.resize()
-  // }
+  applyReaderWidth()
 }
 
 async function initReader() {
@@ -439,22 +638,7 @@ async function initReader() {
     })
     
     // 根据默认阅读模式配置渲染选项
-    const renderOptions = {
-      width: '100%',
-      height: '100%',
-      flow: readMode.value,
-      spread: 'none',
-      minSpreadWidth: 0,
-      ignoreClass: ''
-    }
-    if (readMode.value === 'scrolled') {
-      renderOptions.manager = 'continuous'
-      renderOptions.overflow = 'auto'
-      // 确保滚动模式加载所有内容
-      renderOptions.snap = false
-    } else {
-      // Paginated mode
-    }
+    const renderOptions = createRenderOptions()
 
     rendition = epubBook.renderTo('viewer', renderOptions)
 
@@ -495,13 +679,14 @@ async function initReader() {
     }, 500)
 
     rendition.on('rendered', () => {
-      const location = rendition.currentLocation()
+      const location = getCurrentLocationSafe()
       if (location) {
         updateProgress(location)
       }
       
       // 每次页面渲染后重新设置右键监听
       setupIframeContextMenu()
+      setupChapterScrollNavigation()
     })
 
     rendition.on('relocated', (location) => {
@@ -523,44 +708,31 @@ async function initReader() {
 
     // 先显示内容，再生成 locations（优化首次加载速度）
     setTimeout(async () => {
-      applyTheme()
-      
-      // 异步加载进度，不阻塞显示
-      const progressPromise = bookStore.loadProgress(props.book.id)
-      
-      // 立即渲染第一页（不等待进度）
-      await rendition.display()
-      
-      // 隐藏加载提示
-      isLoading.value = false
-      
-      // 应用初始最大宽度设置
-      const viewer = document.getElementById('viewer')
-      if (viewer) {
-        viewer.style.setProperty('max-width', maxReaderWidth.value + 'px', 'important')
-      }
-      
-      // 等待进度加载完成后恢复位置
-      await progressPromise
-      if (bookStore.currentProgress && bookStore.currentProgress.cfi) {
-        // Check if saved position is cover/copyright page
-        
-        // 检查是否是封面或版权页，如果是则跳转到第一章
-        const cfi = bookStore.currentProgress.cfi
-        if (cfi.includes('titlepage') || cfi.includes('copyright') || cfi.includes('cover')) {
-          // Saved position is cover/copyright page, jumping to first chapter instead
-          // 继续执行下面的跳转到第一章逻辑
-        } else {
-          await rendition.display(cfi)
-          // 后台生成 locations（不阻塞显示）
-          generateLocationsInBackground()
-          return  // 直接返回，不执行后面的跳转逻辑
+      try {
+        applyTheme()
+
+        const progressPromise = bookStore.loadProgress(props.book.id).catch((error) => {
+          console.warn('Failed to load reading progress:', error)
+          return null
+        })
+
+        await displayBook(null, 15000, 'Initial EPUB render timed out')
+        isLoading.value = false
+        setupChapterScrollNavigation()
+
+        applyReaderWidth()
+
+        await progressPromise
+        if (bookStore.currentProgress && bookStore.currentProgress.cfi) {
+          const cfi = bookStore.currentProgress.cfi
+          if (!cfi.includes('titlepage') && !cfi.includes('copyright') && !cfi.includes('cover')) {
+            await displayBook(cfi, 15000, 'Saved position render timed out')
+            generateLocationsInBackground()
+            return
+          }
         }
-      }
-      
-      // 如果没有阅读进度，跳转到目录中的第一个章节（跳过封面和版权页）
+
         if (toc.value && toc.value.length > 0) {
-          // 查找第一个非封面/版权的章节
           let firstChapter = null
           let fallbackChapter = null
           
@@ -594,16 +766,20 @@ async function initReader() {
           }
           
           if (firstChapter) {
-            await rendition.display(firstChapter.href)
+            await displayBook(firstChapter.href, 15000, 'First chapter render timed out')
           } else {
-            await rendition.display()  // 从开头显示
+            await displayBook(null, 15000, 'Fallback EPUB render timed out')
           }
         } else {
-          await rendition.display()  // 从开头显示
+          await displayBook(null, 15000, 'Fallback EPUB render timed out')
         }
       
-      // 后台生成 locations（不阻塞显示）
-      generateLocationsInBackground()
+        generateLocationsInBackground()
+      } catch (error) {
+        console.error('Failed to render EPUB:', error)
+        alert('加载书籍失败：' + error.message)
+        isLoading.value = false
+      }
     }, 300)  // 减少等待时间到 300ms
   } catch (error) {
     console.error('Failed to initialize reader:', error.message)
@@ -690,17 +866,9 @@ function jumpToPercent(percent) {
     if (locCount > 0) {
       const cfi = locs.cfiFromPercentage(percent / 100)
       if (cfi) {
-        rendition.display(cfi)
-        // 滚动模式：display() 会打断 continuous manager 的章节串联，
-        // 需要手动触发滚动事件让管理器检测位置并加载相邻章节
-        if (readMode.value === 'scrolled') {
-          requestAnimationFrame(() => {
-            const viewer = document.getElementById('viewer')
-            if (viewer) {
-              viewer.dispatchEvent(new Event('scroll', { bubbles: true }))
-            }
-          })
-        }
+        Promise.resolve(rendition.display(cfi)).then(() => {
+          setupChapterScrollNavigation()
+        })
         return
       }
     }
@@ -711,7 +879,9 @@ function jumpToPercent(percent) {
       const idx = Math.floor((percent / 100) * (spine.length - 1))
       const target = spine.get(idx)
       if (target) {
-        rendition.display(target.href || target.idref)
+        Promise.resolve(rendition.display(target.href || target.idref)).then(() => {
+          setupChapterScrollNavigation()
+        })
         return
       }
     }
@@ -763,7 +933,7 @@ function handleThumbMouseDown(event) {
 }
 
 async function saveProgress() {
-  const location = rendition.currentLocation()
+  const location = getCurrentLocationSafe()
   if (location && location.start) {
     const progressData = {
       bookId: props.book.id,
@@ -926,19 +1096,27 @@ function showAnnotationPopup(annotation, event) {
 }
 
 function goToBookmark(bookmark) {
-  rendition.display(bookmark.cfi)
+  Promise.resolve(rendition.display(bookmark.cfi)).then(() => {
+    setupChapterScrollNavigation()
+  })
 }
 
 function goToChapter(href) {
-  rendition.display(href)
+  Promise.resolve(rendition.display(href)).then(() => {
+    setupChapterScrollNavigation()
+  })
 }
 
 function prevPage() {
-  rendition.prev()
+  Promise.resolve(rendition.prev()).then(() => {
+    setupChapterScrollNavigation(readMode.value === 'scrolled')
+  })
 }
 
 function nextPage() {
-  rendition.next()
+  Promise.resolve(rendition.next()).then(() => {
+    setupChapterScrollNavigation()
+  })
 }
 
 function changeFontSize(delta) {
@@ -963,11 +1141,7 @@ function changeLineHeight(value) {
 
 function changeMaxReaderWidth(value) {
   maxReaderWidth.value = parseInt(value)
-  // 应用宽度变化
-  const viewer = document.getElementById('viewer')
-  if (viewer) {
-    viewer.style.setProperty('max-width', maxReaderWidth.value + 'px', 'important')
-  }
+  applyReaderWidth()
 }
 
 function applyTheme() {
@@ -1230,7 +1404,7 @@ function goToSearchResult(index) {
       // 跳转到结果所在的章节
       rendition.display(result.href)
         .then(() => {
-          // Successfully navigated to chapter
+          setupChapterScrollNavigation()
         })
         .catch((error) => {
           console.error('Failed to navigate to chapter:', error)
@@ -1318,7 +1492,7 @@ function handleContainerClick(event) {
 }
 
 async function handleAddBookmark() {
-  const location = rendition.currentLocation()
+  const location = getCurrentLocationSafe()
   if (location && location.start) {
     await bookStore.addBookmark({
       bookId: props.book.id,
@@ -1343,33 +1517,18 @@ function changeReadMode() {
   if (!rendition || !epubBook) return
   
   // 保存当前位置
-  const location = rendition.currentLocation()
+  const location = getCurrentLocationSafe()
   const currentCfi = location?.start?.cfi
   
   // 销毁当前渲染
+  clearChapterScrollNavigation()
   rendition.destroy()
   
   // 重新创建渲染
   setTimeout(async () => {
     try {
       // 根据阅读模式使用不同的配置
-      const renderOptions = {
-        width: '100%',
-        height: '100%',
-        flow: readMode.value,
-        spread: 'none',
-        minSpreadWidth: 0,
-        ignoreClass: ''
-      }
-      
-      // 滚动模式的特殊配置
-      if (readMode.value === 'scrolled') {
-        renderOptions.manager = 'continuous'  // 使用连续管理器
-        renderOptions.overflow = 'auto'
-        renderOptions.snap = false  // 禁用吸附，允许自由滚动
-      } else {
-        // Paginated mode
-      }
+      const renderOptions = createRenderOptions()
       
       rendition = epubBook.renderTo('viewer', renderOptions)
       
@@ -1380,9 +1539,9 @@ function changeReadMode() {
       
       // 恢复到之前的位置或从开头开始
       if (currentCfi) {
-        await rendition.display(currentCfi)
+        await displayBook(currentCfi, 15000, 'Saved position render timed out')
       } else {
-        await rendition.display()
+        await displayBook(null, 15000, 'Fallback EPUB render timed out')
       }
       
       // 检查 viewer 容器的状态
@@ -1403,10 +1562,11 @@ function changeReadMode() {
       
       // 重新绑定事件
       rendition.on('rendered', () => {
-        const location = rendition.currentLocation()
+        const location = getCurrentLocationSafe()
         if (location) {
           updateProgress(location)
         }
+        setupChapterScrollNavigation()
       })
       
       rendition.on('relocated', (location) => {

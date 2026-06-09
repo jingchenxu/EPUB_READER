@@ -477,7 +477,7 @@
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useBookStore } from '../stores/bookStore'
 import { buildFileUrl } from '../utils/pathHelper'
-import { authFetch, createAuthHeaders, getAuthToken } from '../utils/httpHelper'
+import { authFetch, getAuthToken, setLogoutCallback } from '../utils/httpHelper'
 
 const bookStore = useBookStore()
 const books = computed(() => bookStore.books)
@@ -805,6 +805,7 @@ function handleLogout() {
   username.value = ''
   authToken.value = ''
   localStorage.removeItem('auth_token')
+  localStorage.removeItem('auth_token_full')
   localStorage.removeItem('username')
   alert('已退出登录')
 }
@@ -1049,12 +1050,9 @@ async function syncBookToCloud(book, event) {
     formData.append('bookPath', book.book_path || '')
     
     // 4. 发送请求
-    const headers = createAuthHeaders()
-    delete headers.headers['Content-Type']
     
-    const response = await fetch('http://localhost:8080/api/books/sync', {
+    const response = await authFetch('http://localhost:8080/api/books/sync', {
       method: 'POST',
-      headers: headers.headers,
       body: formData
     })
     
@@ -1139,6 +1137,9 @@ watch(showSettings, (val) => {
 
 // 组件挂载时检查是否有缓存的 token
 onMounted(async () => {
+  // 注册登出回调，云端接口401/403时自动退出登录
+  setLogoutCallback(handleLogout)
+  
   // 检查本地缓存的 token
   const cachedToken = localStorage.getItem('auth_token')
   const cachedUsername = localStorage.getItem('username')

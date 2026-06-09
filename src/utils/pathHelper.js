@@ -17,13 +17,19 @@ export function buildFileUrl(relativePath, userDataPath, appPath) {
 
   // 标准化路径分隔符
   const normalizedPath = relativePath.replace(/\\/g, '/')
+  if (normalizedPath.startsWith('file:///')) {
+    return normalizedPath
+  }
 
   // 检查是否是生产环境（打包后）
   const isProduction = appPath && (appPath.includes('resources') && appPath.includes('app.asar'))
 
   let absolutePath
+  const isAbsolutePath = /^[a-zA-Z]:\//.test(normalizedPath) || normalizedPath.startsWith('/')
 
-  if (isProduction) {
+  if (isAbsolutePath) {
+    absolutePath = normalizedPath
+  } else if (isProduction) {
     // 生产环境：使用用户数据目录
     // userDataPath: C:\Users\xxx\AppData\Roaming\epub-reader
     // relativePath: upload/covers/cover_xxx.jpg

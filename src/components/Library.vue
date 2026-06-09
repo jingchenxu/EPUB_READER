@@ -890,9 +890,6 @@ function handleImageError(event) {
   const placeholder = event.target.parentElement.querySelector('.cover-placeholder')
   if (placeholder) {
     placeholder.style.display = 'flex'
-    console.log('Showing placeholder')
-  } else {
-    console.error('Placeholder not found')
   }
 }
 </script>

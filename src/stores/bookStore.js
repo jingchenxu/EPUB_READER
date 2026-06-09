@@ -11,11 +11,8 @@ export const useBookStore = defineStore('book', () => {
 
   async function loadBooks(categoryId = null) {
     try {
-      console.log('Loading books from database...', categoryId ? `category: ${categoryId}` : 'all')
       const loadedBooks = await window.electronAPI.getBooks(categoryId)
-      console.log('Books loaded:', loadedBooks.length, 'books')
       books.value = loadedBooks
-      console.log('Total books in store:', books.value.length)
     } catch (error) {
       console.error('Failed to load books:', error)
     }
@@ -23,9 +20,7 @@ export const useBookStore = defineStore('book', () => {
   
   async function loadCategories() {
     try {
-      console.log('Loading categories...')
       const loadedCategories = await window.electronAPI.getCategories()
-      console.log('Categories loaded:', loadedCategories)
       categories.value = loadedCategories
     } catch (error) {
       console.error('Failed to load categories:', error)
@@ -61,11 +56,8 @@ export const useBookStore = defineStore('book', () => {
   }
   
   async function selectCategory(categoryId) {
-    console.log('selectCategory called with:', categoryId)
     currentCategory.value = categoryId
-    console.log('currentCategory set to:', currentCategory.value)
     await loadBooks(categoryId)
-    console.log('loadBooks completed, books count:', books.value.length)
   }
 
   async function openEpub() {
@@ -80,7 +72,6 @@ export const useBookStore = defineStore('book', () => {
       
       if (result && result.success) {
         await loadBooks()
-        console.log('✅ Books reloaded, count:', books.value.length)
         
         // 显示添加结果
         if (result.added.length > 0) {
@@ -88,12 +79,10 @@ export const useBookStore = defineStore('book', () => {
           if (result.skipped > 0) {
             message += `，跳过 ${result.skipped} 本已存在的书籍`
           }
-          console.log(message)
         }
         
         return result
       }
-      console.log('⚠️ No books added (user canceled?)')
       return null
     } catch (error) {
       console.error('❌ Failed to open EPUB:', error)

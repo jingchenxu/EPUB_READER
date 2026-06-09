@@ -1428,7 +1428,6 @@ function handleContextMenu(event) {
       const range = selection.getRangeAt(0)
       const cfi = rendition.getCFI(range)
       selectedCfi.value = cfi
-      console.log('Selected CFI:', cfi)
     } catch (e) {
       console.warn('Failed to get CFI:', e)
       selectedCfi.value = ''
@@ -1441,34 +1440,24 @@ function handleContextMenu(event) {
     y: event.clientY
   }
   showContextMenu.value = true
-  
-  console.log('✅ Context menu shown for text:', text.substring(0, 50))
-  console.log('Menu position:', contextMenuPosition.value)
 }
 
 // 设置 iframe 的右键事件监听
 function setupIframeContextMenu() {
-  console.log('Setting up iframe contextmenu listener...')
-  
   const trySetupListener = (attempt = 0) => {
     const viewerElement = document.getElementById('viewer')
     if (!viewerElement) {
-      console.warn('Viewer element not found')
       return false
     }
     
     const iframe = viewerElement.querySelector('iframe')
     if (!iframe) {
-      console.warn(`No iframe found in viewer (attempt ${attempt + 1})`)
       return false
     }
-    
-    console.log('Iframe found:', iframe.id || 'unknown')
     
     try {
       // 检查 iframe 是否已加载
       if (!iframe.contentDocument) {
-        console.warn('Iframe contentDocument not ready yet')
         return false
       }
       
@@ -1607,8 +1596,6 @@ function closeContextMenu() {
 // 摘抄功能
 function handleExtract() {
   closeContextMenu()
-  console.log('提取文本:', selectedText.value)
-  console.log('CFI:', selectedCfi.value)
   // TODO: 实现摘抄保存到数据库
   alert('已摘抄：' + selectedText.value.substring(0, 50) + '...')
 }
@@ -1616,8 +1603,6 @@ function handleExtract() {
 // 批注功能
 function handleAnnotate() {
   closeContextMenu()
-  console.log('批注文本:', selectedText.value)
-  console.log('CFI:', selectedCfi.value)
   
   // 清空之前的批注内容
   annotationText.value = ''
@@ -1639,13 +1624,6 @@ async function saveAnnotation() {
     return
   }
   
-  console.log('保存批注:', {
-    text: selectedText.value,
-    cfi: selectedCfi.value,
-    annotation: annotationText.value,
-    bookId: props.book.id
-  })
-  
   try {
     // 调用 API 保存批注到数据库
     const result = await window.electronAPI.saveAnnotation({
@@ -1657,7 +1635,6 @@ async function saveAnnotation() {
     })
     
     if (result.success) {
-      console.log('批注保存成功，ID:', result.id)
       alert('批注保存成功！')
       closeAnnotationBox()
       

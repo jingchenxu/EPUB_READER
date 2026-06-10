@@ -204,7 +204,7 @@
                   </td>
                   <td class="cloud-actions">
                     <button 
-                      v-if="!book.downloaded" 
+                      v-if="!book.localDownloaded" 
                       class="btn-cloud-download" 
                       :disabled="downloadingBookIds.has(book.id)"
                       @click="handleCloudDownload(book)"
@@ -856,7 +856,7 @@ async function handleRefreshCloud() {
 }
 
 function handleCloudRead(book) {
-  if (book.downloaded && book.localBookId) {
+  if (book.localDownloaded && book.localBookId) {
     const localBook = books.value.find(b => b.id === book.localBookId)
     if (localBook) {
       handleReadBook(localBook)
@@ -891,7 +891,7 @@ async function handleCloudDownload(book) {
     if (result.success) {
       alert(`《${book.title}》下载成功！`)
       // 更新本地状态
-      book.downloaded = true
+      book.localDownloaded = true
       book.localBookId = result.book.id
       // 重新加载书籍列表和云端数据
       await bookStore.loadBooks(bookStore.currentCategory)
@@ -900,7 +900,7 @@ async function handleCloudDownload(book) {
       alert('下载失败：' + (result.error || '未知错误'))
       if (result.book) {
         // 已存在的情况，刷新云端数据
-        book.downloaded = true
+        book.localDownloaded = true
         book.localBookId = result.book.id
       }
     }
@@ -934,6 +934,100 @@ function isBookSyncing(book) {
 }
 
 // 获取云端书籍列表
+function pickFirstDefined(source, keys) {
+  for (const key of keys) {
+    if (source && source[key] !== undefined && source[key] !== null && source[key] !== '') {
+      return source[key]
+    }
+  }
+  return undefined
+}
+
+function normalizeCloudCategory(cloudBook) {
+  const value = pickFirstDefined(cloudBook, [
+    'category',
+    'categoryName',
+    'category_name',
+    'cloudCategory',
+    'cloud_category',
+    'folder',
+    'folderName',
+    'folder_name'
+  ])
+
+  if (value && typeof value === 'object') {
+    return value.name || value.title || value.label || '未分类'
+  }
+
+  return value || '未分类'
+}
+
+function normalizeCloudDownloaded(cloudBook) {
+  const value = pickFirstDefined(cloudBook, [
+    'downloaded',
+    'isDownloaded',
+    'is_downloaded',
+    'downloadStatus',
+    'download_status'
+  ])
+
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value > 0
+  if (typeof value === 'string') {
+    return ['true', '1', 'yes', 'downloaded', '已下载'].includes(value.toLowerCase())
+  }
+
+  return false
+}
+
+function normalizeCloudProgress(cloudBook) {
+  const value = pickFirstDefined(cloudBook, [
+    'percentage',
+    'progress',
+    'readingProgress',
+    'reading_progress',
+    'progressPercentage',
+    'progress_percentage'
+  ])
+
+  if (value === undefined) return null
+
+  const numeric = Number(value)
+  if (Number.isNaN(numeric) || numeric <= 0) return null
+
+  return numeric > 1 ? numeric : numeric * 100
+}
+
+function normalizeCloudLastRead(cloudBook) {
+  const value = pickFirstDefined(cloudBook, [
+    'lastRead',
+    'last_read',
+    'lastReadAt',
+    'last_read_at',
+    'lastReadingAt',
+    'last_reading_at',
+    'last_read_time',
+    'progressUpdatedAt',
+    'progress_updated_at'
+  ])
+
+  if (!value) return ''
+
+  const date = new Date(value)
+  const text = Number.isNaN(date.getTime())
+    ? String(value)
+    : date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+
+  const progress = normalizeCloudProgress(cloudBook)
+  return progress ? `${text} (${Math.round(progress)}%)` : text
+}
+
 async function fetchCloudBooks() {
   if (!isLoggedIn.value) return
   
@@ -942,6 +1036,21 @@ async function fetchCloudBooks() {
     const data = await response.json()
     
     if (data.success && Array.isArray(data.data)) {
+      const cloudOnlyBooks = data.data.map((cloudBook) => {
+        const localBook = books.value.find(b => b.title === cloudBook.title)
+        return {
+          ...cloudBook,
+          downloaded: normalizeCloudDownloaded(cloudBook),
+          category: normalizeCloudCategory(cloudBook),
+          lastRead: normalizeCloudLastRead(cloudBook),
+          localDownloaded: Boolean(localBook),
+          localBookId: localBook?.id || null
+        }
+      })
+      cloudBooks.value = cloudOnlyBooks
+      cloudSyncedTitles.value = new Set(data.data.map(b => b.title))
+      return
+
       // 用本地数据丰富云端书籍信息
       const enrichedBooks = []
       for (const cloudBook of data.data) {

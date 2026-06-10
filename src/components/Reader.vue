@@ -382,6 +382,10 @@ let isAutoChapterNavigating = false
 let removeChapterScrollListener = null
 let lastAutoChapterNavigationAt = 0
 let suppressWheelUntil = 0
+let processedWheelEvents = new WeakSet()
+let scrolledProgressFrame = null
+let lastLocationSnapshot = null
+let chapterScrollRetryTimer = null
 
 function hasRenderedContent() {
   const viewer = document.getElementById('viewer')
@@ -444,11 +448,193 @@ function getChapterScrollElement() {
   const viewer = document.getElementById('viewer')
   const iframe = viewer?.querySelector('iframe')
   const iframeDoc = iframe?.contentDocument
+  const epubContainer = viewer?.querySelector('.epub-container, [id^="epubjs-container"]')
+  if (epubContainer) return epubContainer
 
-  return iframeDoc?.scrollingElement || iframeDoc?.documentElement || iframeDoc?.body || viewer
+  const candidates = [
+    iframeDoc?.scrollingElement,
+    iframeDoc?.documentElement,
+    iframeDoc?.body,
+    viewer
+  ].filter(Boolean)
+
+  return candidates.find((element) => element.scrollHeight > element.clientHeight + 4) || epubContainer || viewer || null
+}
+
+function getLocationPercent(locationPoint) {
+  if (!locationPoint) return null
+
+  if (locationPoint.percentage !== undefined && locationPoint.percentage !== null) {
+    return locationPoint.percentage * 100
+  }
+
+  if (epubBook?.locations && locationPoint.cfi) {
+    const percentage = epubBook.locations.percentageFromCfi(locationPoint.cfi)
+    if (percentage !== undefined && percentage !== null) {
+      return percentage * 100
+    }
+  }
+
+  return null
+}
+
+function getSpineProgressPercent(localRatio = 0) {
+  const index = lastLocationSnapshot?.start?.index
+  const spineLength = epubBook?.spine?.length
+
+  if (typeof index !== 'number' || !spineLength) return null
+
+  return Math.max(0, Math.min(100, ((index + localRatio) / spineLength) * 100))
+}
+
+function getDisplayedProgressPercent(location = lastLocationSnapshot) {
+  const page = location?.start?.displayed?.page
+  const total = location?.start?.displayed?.total
+
+  if (!page || !total) return null
+
+  return Math.max(0, Math.min(100, (page / total) * 100))
+}
+
+function getAdjacentSpineTarget(toPrevious) {
+  const location = getCurrentLocationSafe() || lastLocationSnapshot
+  const viewRef = document.querySelector('#viewer .epub-view')?.getAttribute('ref')
+  const viewIndex = viewRef !== undefined && viewRef !== null ? Number.parseInt(viewRef, 10) : null
+  const currentIndex = typeof location?.start?.index === 'number' ? location.start.index : viewIndex
+  const spine = epubBook?.spine
+  const spineLength = spine?.length
+
+  if (typeof currentIndex !== 'number' || Number.isNaN(currentIndex) || !spineLength) return null
+
+  const nextIndex = currentIndex + (toPrevious ? -1 : 1)
+  if (nextIndex < 0 || nextIndex >= spineLength) return null
+
+  const item = spine.get(nextIndex)
+  return item?.href || item?.idref || null
+}
+
+function prepareSinglePageScrollBoundary(scrollElement) {
+  if (!scrollElement) return
+
+  scrollElement.style.removeProperty('padding-bottom')
+
+  requestAnimationFrame(() => {
+    if (readMode.value !== 'scrolled') return
+    if (scrollElement.scrollHeight - scrollElement.clientHeight <= 24) {
+      scrollElement.style.setProperty('padding-bottom', '12px')
+    }
+  })
+}
+
+function navigateAdjacentChapter(toPrevious) {
+  if (isAutoChapterNavigating || readMode.value !== 'scrolled') return
+  if (Date.now() - lastAutoChapterNavigationAt < 900) return
+
+  isAutoChapterNavigating = true
+  lastAutoChapterNavigationAt = Date.now()
+  suppressWheelUntil = Date.now() + 350
+  const target = getAdjacentSpineTarget(toPrevious)
+  const navigation = target ? rendition.display(target) : (toPrevious ? rendition.prev() : rendition.next())
+
+  Promise.resolve(navigation)
+    .then(() => {
+      setupChapterScrollNavigation(toPrevious)
+    })
+    .catch((error) => {
+      console.warn('Failed to auto navigate chapter:', error)
+    })
+    .finally(() => {
+      setTimeout(() => {
+        isAutoChapterNavigating = false
+      }, 150)
+    })
+}
+
+function handleChapterWheel(event) {
+  if (readMode.value !== 'scrolled') return
+  if (processedWheelEvents.has(event)) return
+  processedWheelEvents.add(event)
+
+  if (isAutoChapterNavigating || Date.now() < suppressWheelUntil) {
+    event.preventDefault()
+    return
+  }
+
+  const scrollElement = chapterScrollElement || getChapterScrollElement()
+  if (!scrollElement) return
+
+  const { scrollTop, scrollHeight, clientHeight } = scrollElement
+  const scrollableDistance = scrollHeight - clientHeight
+  if (scrollableDistance <= 24) {
+    if (event.deltaY === 0) return
+    event.preventDefault()
+    navigateAdjacentChapter(event.deltaY < 0)
+    return
+  }
+
+  const atExactBottom = scrollTop + clientHeight >= scrollHeight - 2
+  const atExactTop = scrollTop <= 0
+
+  if (event.deltaY > 0 && atExactBottom) {
+    event.preventDefault()
+    navigateAdjacentChapter(false)
+  } else if (event.deltaY < 0 && atExactTop) {
+    event.preventDefault()
+    navigateAdjacentChapter(true)
+  }
+}
+
+function updateScrolledProgressFromScroll(scrollElement) {
+  if (readMode.value !== 'scrolled' || !scrollElement) return
+
+  const { scrollTop, scrollHeight, clientHeight } = scrollElement
+  const scrollable = Math.max(0, scrollHeight - clientHeight)
+  const localRatio = scrollable > 0 ? Math.max(0, Math.min(1, scrollTop / scrollable)) : 1
+  const startPercent = getLocationPercent(lastLocationSnapshot?.start)
+  const endPercent = getLocationPercent(lastLocationSnapshot?.end)
+
+  if (startPercent !== null && endPercent !== null && endPercent >= startPercent) {
+    currentPercentage.value = Math.max(0, Math.min(100, startPercent + ((endPercent - startPercent) * localRatio)))
+    return
+  }
+
+  if (startPercent !== null) {
+    currentPercentage.value = Math.max(0, Math.min(100, startPercent))
+    return
+  }
+
+  const spinePercent = getSpineProgressPercent(localRatio)
+  if (spinePercent !== null) {
+    currentPercentage.value = spinePercent
+    return
+  }
+
+  const displayedPercent = getDisplayedProgressPercent()
+  if (displayedPercent !== null) {
+    currentPercentage.value = displayedPercent
+  }
+}
+
+function scheduleScrolledProgressUpdate(scrollElement) {
+  if (scrolledProgressFrame) return
+
+  scrolledProgressFrame = requestAnimationFrame(() => {
+    scrolledProgressFrame = null
+    updateScrolledProgressFromScroll(scrollElement)
+  })
 }
 
 function clearChapterScrollNavigation() {
+  if (chapterScrollRetryTimer) {
+    clearTimeout(chapterScrollRetryTimer)
+    chapterScrollRetryTimer = null
+  }
+
+  if (scrolledProgressFrame) {
+    cancelAnimationFrame(scrolledProgressFrame)
+    scrolledProgressFrame = null
+  }
+
   if (removeChapterScrollListener) {
     removeChapterScrollListener()
     removeChapterScrollListener = null
@@ -456,12 +642,15 @@ function clearChapterScrollNavigation() {
   chapterScrollElement = null
 }
 
-function setupChapterScrollNavigation(scrollToEnd = false) {
+function setupChapterScrollNavigation(scrollToEnd = false, retryCount = 0) {
   clearChapterScrollNavigation()
 
   if (readMode.value !== 'scrolled') return
 
   requestAnimationFrame(() => {
+    const viewer = document.getElementById('viewer')
+    const iframe = viewer?.querySelector('iframe')
+    const iframeDoc = iframe?.contentDocument
     const scrollElement = getChapterScrollElement()
     if (!scrollElement) return
 
@@ -471,30 +660,18 @@ function setupChapterScrollNavigation(scrollToEnd = false) {
       scrollElement.scrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight)
     }
 
+    prepareSinglePageScrollBoundary(scrollElement)
+
+    const location = getCurrentLocationSafe()
+    if (location) {
+      updateProgress(location)
+    }
+
+    updateScrolledProgressFromScroll(scrollElement)
+
     let lastScrollTop = scrollElement.scrollTop
 
-    const navigateChapter = (toPrevious) => {
-      if (isAutoChapterNavigating || readMode.value !== 'scrolled') return
-      if (Date.now() - lastAutoChapterNavigationAt < 900) return
-
-      isAutoChapterNavigating = true
-      lastAutoChapterNavigationAt = Date.now()
-      suppressWheelUntil = Date.now() + 350
-      const navigation = toPrevious ? rendition.prev() : rendition.next()
-
-      Promise.resolve(navigation)
-        .then(() => {
-          setupChapterScrollNavigation(toPrevious)
-        })
-        .catch((error) => {
-          console.warn('Failed to auto navigate chapter:', error)
-        })
-        .finally(() => {
-          setTimeout(() => {
-            isAutoChapterNavigating = false
-          }, 150)
-        })
-    }
+    const navigateChapter = navigateAdjacentChapter
 
     const onScroll = () => {
       if (isAutoChapterNavigating || readMode.value !== 'scrolled') return
@@ -515,34 +692,32 @@ function setupChapterScrollNavigation(scrollToEnd = false) {
       navigateChapter(atTop)
     }
 
-    const onWheel = (event) => {
-      if (readMode.value !== 'scrolled') return
+    const onWheel = handleChapterWheel
 
-      if (isAutoChapterNavigating || Date.now() < suppressWheelUntil) {
-        event.preventDefault()
-        return
-      }
-
-      const { scrollTop, scrollHeight, clientHeight } = scrollElement
-      const noScrollableContent = scrollHeight <= clientHeight + 4
-      // 必须完全无法继续滚动（0px余量）才拦截滚轮
-      const atExactBottom = scrollTop + clientHeight >= scrollHeight - 2
-      const atExactTop = scrollTop <= 0
-
-      if (event.deltaY > 0 && (atExactBottom || noScrollableContent)) {
-        event.preventDefault()
-        navigateChapter(false)
-      } else if (event.deltaY < 0 && (atExactTop || noScrollableContent)) {
-        event.preventDefault()
-        navigateChapter(true)
-      }
+    const onProgressScroll = () => {
+      scheduleScrolledProgressUpdate(scrollElement)
     }
 
-    scrollElement.addEventListener('scroll', onScroll, { passive: true })
+    scrollElement.addEventListener('scroll', onProgressScroll, { passive: true })
     scrollElement.addEventListener('wheel', onWheel, { passive: false })
+    viewer?.addEventListener('wheel', onWheel, { passive: false })
+    iframe?.addEventListener('wheel', onWheel, { passive: false, capture: true })
+    iframeDoc?.addEventListener('wheel', onWheel, { passive: false, capture: true })
+    iframe?.contentWindow?.addEventListener('wheel', onWheel, { passive: false, capture: true })
     removeChapterScrollListener = () => {
-      scrollElement.removeEventListener('scroll', onScroll)
+      scrollElement.removeEventListener('scroll', onProgressScroll)
       scrollElement.removeEventListener('wheel', onWheel)
+      viewer?.removeEventListener('wheel', onWheel)
+      iframe?.removeEventListener('wheel', onWheel, { capture: true })
+      iframeDoc?.removeEventListener('wheel', onWheel, { capture: true })
+      iframe?.contentWindow?.removeEventListener('wheel', onWheel, { capture: true })
+    }
+
+    if (retryCount < 1) {
+      chapterScrollRetryTimer = setTimeout(() => {
+        chapterScrollRetryTimer = null
+        setupChapterScrollNavigation(scrollToEnd, retryCount + 1)
+      }, 120)
     }
   })
 }
@@ -646,6 +821,8 @@ async function initReader() {
     // 绕过 epubjs themes API 的不可靠切换问题
     rendition.hooks.content.register((contents) => {
       applyIframeTheme(contents)
+      contents?.document?.addEventListener('wheel', handleChapterWheel, { passive: false, capture: true })
+      contents?.window?.addEventListener('wheel', handleChapterWheel, { passive: false, capture: true })
     })
 
     // 先不显示，等待加载 TOC 和恢复进度后再显示
@@ -802,6 +979,7 @@ async function generateLocationsInBackground() {
 
 function updateProgress(location) {
   if (location && location.start) {
+    lastLocationSnapshot = location
     currentPage.value = location.start.displayed.page
     totalPages.value = location.start.displayed.total
     
@@ -811,20 +989,20 @@ function updateProgress(location) {
       const rawPercentage = location.start.percentage
       
       if (rawPercentage !== undefined && rawPercentage !== null && rawPercentage > 0) {
-        currentPercentage.value = Math.round(rawPercentage * 100)
+        currentPercentage.value = rawPercentage * 100
       } else {
         // 如果 percentage 不可用或为0，尝试其他方法
         // 尝试使用 CFI 来估算进度（需要加载完整的 locations）
         if (epubBook && epubBook.locations) {
           const cfi = location.start.cfi
           const percentage = epubBook.locations.percentageFromCfi(cfi)
-          if (percentage !== undefined && percentage !== null) {
-            currentPercentage.value = Math.round(percentage * 100)
+          if (percentage !== undefined && percentage !== null && percentage > 0) {
+            currentPercentage.value = percentage * 100
           } else {
-            currentPercentage.value = 0
+            currentPercentage.value = getSpineProgressPercent(0) ?? getDisplayedProgressPercent(location) ?? 0
           }
         } else {
-          currentPercentage.value = 0
+          currentPercentage.value = getSpineProgressPercent(0) ?? getDisplayedProgressPercent(location) ?? 0
         }
       }
     } else {
@@ -939,7 +1117,7 @@ async function saveProgress() {
       bookId: props.book.id,
       cfi: location.start.cfi,
       page: location.start.displayed.page,
-      percentage: location.start.percentage
+      percentage: currentPercentage.value / 100
     }
     
     // 保存到本地数据库
@@ -979,7 +1157,7 @@ function debouncedSaveProgress() {
   saveProgressTimer = setTimeout(() => {
     saveProgress()
     saveProgressTimer = null
-  }, 500)
+  }, 300)
 }
 
 async function loadBookmarks() {
@@ -1535,6 +1713,8 @@ function changeReadMode() {
       // 注册内容钩子以应用主题
       rendition.hooks.content.register((contents) => {
         applyIframeTheme(contents)
+        contents?.document?.addEventListener('wheel', handleChapterWheel, { passive: false, capture: true })
+        contents?.window?.addEventListener('wheel', handleChapterWheel, { passive: false, capture: true })
       })
       
       // 恢复到之前的位置或从开头开始

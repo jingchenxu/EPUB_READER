@@ -17,8 +17,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.tag }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -33,9 +31,7 @@ jobs:
         run: npm run build
 
       - name: Build Linux packages (AppImage + deb)
-        run: npx electron-builder --linux --x64
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --linux --x64 --publish never
 
       - name: Upload assets to Release
         uses: softprops/action-gh-release@v2

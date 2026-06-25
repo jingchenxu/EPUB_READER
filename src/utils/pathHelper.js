@@ -40,10 +40,9 @@ export function buildFileUrl(relativePath, userDataPath, appPath) {
     absolutePath = `${userDataPath}/${normalizedPath}`
   }
 
-  // 转换为 file:// URL
-  // Windows: file:///C:/Users/...
-  // Unix: file:///home/...
-  const fileUrl = `file:///${absolutePath}`
+  // 转换为应用内部受控协议 URL，保留路径层级，只编码中文、空格等 URL 特殊字符。
+  const urlPath = absolutePath.replace(/\\/g, '/')
+  const fileUrl = encodeURI(`epub-file:///${urlPath}`)
 
   return fileUrl
 }
@@ -54,5 +53,5 @@ export function buildFileUrl(relativePath, userDataPath, appPath) {
  * @returns {boolean}
  */
 export function isValidFileUrl(url) {
-  return url && url.startsWith('file:///')
+  return url && (url.startsWith('epub-file:///') || url.startsWith('file:///'))
 }

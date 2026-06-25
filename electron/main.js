@@ -1,13 +1,26 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, Menu, protocol, net } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
 const Database = require('better-sqlite3')
 const AdmZip = require('adm-zip')
 const xml2js = require('xml2js')
+const { pathToFileURL } = require('url')
 
 let mainWindow
 let db
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'epub-file',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true
+    }
+  }
+])
 
 // 预编译的数据库语句（提高性能）
 let preparedStatements = {}
@@ -30,6 +43,42 @@ function generateFileHash(filePath) {
       reject(error)
     })
   })
+}
+
+// Backfill hashes for books imported before file_hash was introduced.
+async function backfillMissingBookHashes() {
+  const books = db.prepare(`
+    SELECT id, book_path
+    FROM books
+    WHERE file_hash IS NULL OR file_hash = ''
+  `).all()
+
+  if (books.length === 0) return
+
+  const updateHash = db.prepare('UPDATE books SET file_hash = ? WHERE id = ?')
+  const userDataPath = app.getPath('userData')
+  let updatedCount = 0
+
+  for (const book of books) {
+    const bookFilePath = path.isAbsolute(book.book_path)
+      ? book.book_path
+      : path.join(userDataPath, book.book_path)
+
+    if (!fs.existsSync(bookFilePath)) {
+      console.warn(`Cannot backfill hash for book ${book.id}: file not found`, bookFilePath)
+      continue
+    }
+
+    try {
+      const fileHash = await generateFileHash(bookFilePath)
+      updateHash.run(fileHash, book.id)
+      updatedCount += 1
+    } catch (error) {
+      console.error(`Failed to backfill hash for book ${book.id}:`, error)
+    }
+  }
+
+  console.log(`Backfilled file hashes for ${updatedCount}/${books.length} books`)
 }
 
 // 从 EPUB 文件中提取元数据
@@ -177,7 +226,7 @@ function findISBN(identifiers) {
   return null
 }
 
-function createDatabase() {
+async function createDatabase() {
   console.log('=== Initializing Database ===')
   
   // 使用用户数据目录存储数据库
@@ -230,6 +279,10 @@ function createDatabase() {
   } catch (error) {
     console.error('Error checking/adding file_hash column:', error)
   }
+
+  await backfillMissingBookHashes()
+  db.exec('CREATE INDEX IF NOT EXISTS idx_books_file_hash ON books(file_hash)')
+  console.log('Index created for books.file_hash')
   
   db.exec(`
     CREATE TABLE IF NOT EXISTS reading_progress (
@@ -317,6 +370,42 @@ function createDatabase() {
   console.log('=== Database Initialized Successfully ===')
 }
 
+function isPathInside(parentPath, childPath) {
+  const relativePath = path.relative(parentPath, childPath)
+  return Boolean(relativePath) && !relativePath.startsWith('..') && !path.isAbsolute(relativePath)
+}
+
+function registerLocalFileProtocol() {
+  protocol.handle('epub-file', (request) => {
+    try {
+      const requestUrl = new URL(request.url)
+      const host = requestUrl.hostname
+      const pathname = requestUrl.pathname.replace(/^\/+/, '')
+
+      let requestedPath
+      if (host && /^[a-zA-Z]$/.test(host)) {
+        // Chromium 将 epub-file:///C:/Users/... 规范化为 epub-file://c/Users/...
+        // 驱动器盘符被移到 host 中，需要还原
+        requestedPath = decodeURIComponent(`${host}:/${pathname}`)
+      } else {
+        requestedPath = decodeURIComponent(pathname)
+      }
+
+      const normalizedPath = path.resolve(requestedPath)
+      const userDataPath = path.resolve(app.getPath('userData'))
+
+      if (!isPathInside(userDataPath, normalizedPath)) {
+        return new Response('Forbidden', { status: 403 })
+      }
+
+      return net.fetch(pathToFileURL(normalizedPath).toString())
+    } catch (error) {
+      console.error('Failed to load local app file:', error)
+      return new Response('Not found', { status: 404 })
+    }
+  })
+}
+
 function createWindow() {
   // 仅在生产环境隐藏菜单栏
   if (!process.env.NODE_ENV || process.env.NODE_ENV !== 'development') {
@@ -330,9 +419,8 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'),
-      webSecurity: false,
-      allowRunningInsecureContent: true
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.js')
     }
   })
 
@@ -348,7 +436,7 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   console.log('=== App Ready ===')
   
   // 仅在生产环境隐藏默认菜单栏
@@ -356,7 +444,8 @@ app.whenReady().then(() => {
     Menu.setApplicationMenu(null)
   }
   
-  createDatabase()
+  registerLocalFileProtocol()
+  await createDatabase()
   console.log('=== Database Initialized ===')
   createWindow()
   console.log('=== Window Created ===')
@@ -822,8 +911,7 @@ ipcMain.handle('open-reader-window', (event, book) => {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,
         nodeIntegration: false,
-        webSecurity: false,
-        allowRunningInsecureContent: true
+        sandbox: true
       }
     })
     

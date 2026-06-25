@@ -195,7 +195,7 @@
                 <tr v-for="book in paginatedCloudBooks" :key="book.id">
                   <td class="cloud-book-title">{{ book.title }}</td>
                   <td>
-                    <span :class="book.downloaded ? 'status-yes' : 'status-no'">{{ book.downloaded ? '是' : '否' }}</span>
+                    <span :class="book.localDownloaded ? 'status-yes' : 'status-no'">{{ book.localDownloaded ? '是' : '否' }}</span>
                   </td>
                   <td>{{ book.category || '未分类' }}</td>
                   <td>
@@ -463,10 +463,35 @@
               @keyup.enter="handleLogin"
             />
           </div>
+          <div class="form-group">
+            <label>图形验证码</label>
+            <div class="captcha-row">
+              <input
+                type="text"
+                v-model="loginForm.captcha"
+                maxlength="4"
+                placeholder="请输入验证码"
+                autocomplete="off"
+                @keyup.enter="handleLogin"
+              />
+              <button
+                type="button"
+                class="captcha-image-button"
+                title="点击刷新验证码"
+                @click="refreshCaptcha"
+              >
+                <img v-if="captchaImageUrl" :src="captchaImageUrl" alt="图形验证码" />
+                <span v-else>刷新</span>
+              </button>
+            </div>
+            <span class="captcha-tip">看不清？点击图片刷新</span>
+          </div>
         </div>
         <div class="modal-actions">
-          <button class="btn-secondary" @click="showLoginDialog = false">取消</button>
-          <button class="btn-primary" @click="handleLogin">登录</button>
+          <button class="btn-secondary" :disabled="isLoginLoading" @click="showLoginDialog = false">取消</button>
+          <button class="btn-primary" :disabled="isLoginLoading" @click="handleLogin">
+            {{ isLoginLoading ? '登录中...' : '登录' }}
+          </button>
         </div>
       </div>
     </div>
@@ -539,9 +564,13 @@ const isLoggedIn = ref(false)
 const username = ref('')
 const loginForm = ref({
   username: '',
-  password: ''
+  password: '',
+  captcha: ''
 })
 const authToken = ref('')
+const captchaImageUrl = ref('')
+const isLoginLoading = ref(false)
+const AUTH_API_BASE = 'http://localhost:8080/api/auth'
 
 // 设置相关状态
 const showSettings = ref(false)
@@ -575,6 +604,7 @@ const presetColors = [
 
 onUnmounted(() => {
   document.removeEventListener('click', closeContextMenu)
+  clearCaptchaImage()
 })
 
 const emit = defineEmits(['read-book'])
@@ -745,22 +775,68 @@ async function handleAssignToCategory(categoryId) {
   }
 }
 
+function clearCaptchaImage() {
+  if (captchaImageUrl.value) {
+    URL.revokeObjectURL(captchaImageUrl.value)
+    captchaImageUrl.value = ''
+  }
+}
+
+async function refreshCaptcha() {
+  clearCaptchaImage()
+  loginForm.value.captcha = ''
+
+  try {
+    const response = await fetch(`${AUTH_API_BASE}/captcha?t=${Date.now()}`, {
+      credentials: 'include'
+    })
+
+    if (!response.ok) {
+      throw new Error(`验证码加载失败 (${response.status})`)
+    }
+
+    const blob = await response.blob()
+    captchaImageUrl.value = URL.createObjectURL(blob)
+  } catch (error) {
+    console.error('刷新验证码失败:', error)
+    alert('验证码加载失败：' + error.message)
+  }
+}
+
+function resetLoginForm() {
+  loginForm.value = {
+    username: '',
+    password: '',
+    captcha: ''
+  }
+}
+
 // 登录功能
 async function handleLogin() {
   if (!loginForm.value.username || !loginForm.value.password) {
     alert('请输入用户名和密码')
     return
   }
-  
+
+  if (!loginForm.value.captcha) {
+    alert('请输入验证码')
+    return
+  }
+
+  if (isLoginLoading.value) return
+  isLoginLoading.value = true
+
   try {
-    const response = await fetch('http://localhost:8080/api/auth/login', {
+    const response = await fetch(`${AUTH_API_BASE}/login`, {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         username: loginForm.value.username,
-        password: loginForm.value.password
+        password: loginForm.value.password,
+        captcha: loginForm.value.captcha
       })
     })
     
@@ -782,20 +858,22 @@ async function handleLogin() {
       
       // 关闭登录对话框
       showLoginDialog.value = false
+      clearCaptchaImage()
       
       // 清空表单
-      loginForm.value = {
-        username: '',
-        password: ''
-      }
+      resetLoginForm()
       
       // 登录成功后获取云端书籍列表
       await fetchCloudBooks()
     } else {
       alert('登录失败：' + (data.message || data.msg || '用户名或密码错误'))
+      await refreshCaptcha()
     }
   } catch (error) {
     alert('登录失败：' + error.message)
+    await refreshCaptcha()
+  } finally {
+    isLoginLoading.value = false
   }
 }
 
@@ -813,7 +891,7 @@ function handleLogout() {
 // 云端存储相关状态
 const cloudTotalSpace = 2 * 1024 * 1024 * 1024 // 2GB
 const cloudUsedSpace = computed(() => {
-  return cloudBooks.value.reduce((sum, b) => sum + (b.size || 0), 0)
+  return cloudBooks.value.reduce((sum, book) => sum + normalizeCloudFileSize(book), 0)
 })
 const cloudCurrentPage = ref(1)
 const cloudPageSize = 10
@@ -829,7 +907,7 @@ const paginatedCloudBooks = computed(() => {
   return cloudBooks.value.slice(start, start + cloudPageSize)
 })
 
-function openCloudStorage() {
+async function openCloudStorage() {
   // 未登录时弹出登录框
   if (!isLoggedIn.value) {
     showLoginDialog.value = true
@@ -838,6 +916,8 @@ function openCloudStorage() {
   showCloudStorage.value = true
   showSettings.value = false
   cloudCurrentPage.value = 1
+  await syncCategoriesToCloud()
+  await fetchCloudBooks()
 }
 
 function closeCloudStorage() {
@@ -849,6 +929,7 @@ async function handleRefreshCloud() {
   if (cloudRefreshing.value) return
   cloudRefreshing.value = true
   try {
+    await syncCategoriesToCloud()
     await fetchCloudBooks()
   } finally {
     cloudRefreshing.value = false
@@ -943,6 +1024,23 @@ function pickFirstDefined(source, keys) {
   return undefined
 }
 
+function normalizeCloudFileSize(cloudBook) {
+  const value = pickFirstDefined(cloudBook, ['fileSize', 'file_size', 'size'])
+  const bytes = Number(value)
+  return Number.isFinite(bytes) && bytes > 0 ? bytes : 0
+}
+
+function findLocalBookForCloudBook(cloudBook) {
+  const cloudHash = pickFirstDefined(cloudBook, ['fileHash', 'file_hash', 'hash'])
+  if (cloudHash) {
+    const normalizedHash = String(cloudHash).toLowerCase()
+    const hashMatch = books.value.find(book => String(book.file_hash || '').toLowerCase() === normalizedHash)
+    if (hashMatch) return hashMatch
+  }
+
+  return books.value.find(book => book.title === cloudBook.title)
+}
+
 function normalizeCloudCategory(cloudBook) {
   const value = pickFirstDefined(cloudBook, [
     'category',
@@ -960,24 +1058,6 @@ function normalizeCloudCategory(cloudBook) {
   }
 
   return value || '未分类'
-}
-
-function normalizeCloudDownloaded(cloudBook) {
-  const value = pickFirstDefined(cloudBook, [
-    'downloaded',
-    'isDownloaded',
-    'is_downloaded',
-    'downloadStatus',
-    'download_status'
-  ])
-
-  if (typeof value === 'boolean') return value
-  if (typeof value === 'number') return value > 0
-  if (typeof value === 'string') {
-    return ['true', '1', 'yes', 'downloaded', '已下载'].includes(value.toLowerCase())
-  }
-
-  return false
 }
 
 function normalizeCloudProgress(cloudBook) {
@@ -1037,63 +1117,45 @@ async function fetchCloudBooks() {
     
     if (data.success && Array.isArray(data.data)) {
       const cloudOnlyBooks = data.data.map((cloudBook) => {
-        const localBook = books.value.find(b => b.title === cloudBook.title)
+        const localBook = findLocalBookForCloudBook(cloudBook)
         return {
           ...cloudBook,
-          downloaded: normalizeCloudDownloaded(cloudBook),
+          fileSize: normalizeCloudFileSize(cloudBook),
+          downloaded: Boolean(localBook),
           category: normalizeCloudCategory(cloudBook),
           lastRead: normalizeCloudLastRead(cloudBook),
           localDownloaded: Boolean(localBook),
           localBookId: localBook?.id || null
         }
       })
-      cloudBooks.value = cloudOnlyBooks
-      cloudSyncedTitles.value = new Set(data.data.map(b => b.title))
-      return
 
-      // 用本地数据丰富云端书籍信息
-      const enrichedBooks = []
-      for (const cloudBook of data.data) {
-        const enriched = { ...cloudBook }
-        // 通过书名匹配本地书籍
+      // 对于云端未返回阅读进度的书籍，使用本地阅读进度补充
+      for (const cloudBook of cloudOnlyBooks) {
+        if (cloudBook.lastRead) continue  // 已有云端数据，跳过
         const localBook = books.value.find(b => b.title === cloudBook.title)
-        if (localBook) {
-          enriched.downloaded = true
-          enriched.localBookId = localBook.id
-          // 获取分类名称
-          if (localBook.category_id) {
-            const cat = categories.value.find(c => c.id === localBook.category_id)
-            enriched.category = cat ? cat.name : '未分类'
-          } else {
-            enriched.category = '未分类'
-          }
-          // 获取最后阅读时间和进度
-          try {
+        if (!localBook) continue
+
+        try {
+          if (localBook.last_read_at) {
+            const dateStr = new Date(localBook.last_read_at).toLocaleString('zh-CN', {
+              year: 'numeric', month: '2-digit', day: '2-digit',
+              hour: '2-digit', minute: '2-digit'
+            })
             const progress = await window.electronAPI.getProgress(localBook.id)
-            if (localBook.last_read_at) {
-              const dateStr = new Date(localBook.last_read_at).toLocaleString('zh-CN', {
-                year: 'numeric', month: '2-digit', day: '2-digit',
-                hour: '2-digit', minute: '2-digit'
-              })
-              if (progress && progress.percentage > 0) {
-                enriched.lastRead = `${dateStr} (${Math.round(progress.percentage * 100)}%)`
-              } else {
-                enriched.lastRead = dateStr
-              }
+            if (progress && progress.percentage > 0) {
+              cloudBook.lastRead = `${dateStr} (${Math.round(progress.percentage * 100)}%)`
             } else {
-              enriched.lastRead = ''
+              cloudBook.lastRead = dateStr
             }
-          } catch (e) {
-            enriched.lastRead = localBook.last_read_at ? new Date(localBook.last_read_at).toLocaleDateString('zh-CN') : ''
           }
-        } else {
-          enriched.downloaded = false
-          enriched.category = '未分类'
-          enriched.lastRead = ''
+        } catch (e) {
+          cloudBook.lastRead = localBook.last_read_at
+            ? new Date(localBook.last_read_at).toLocaleDateString('zh-CN')
+            : ''
         }
-        enrichedBooks.push(enriched)
       }
-      cloudBooks.value = enrichedBooks
+
+      cloudBooks.value = cloudOnlyBooks
       cloudSyncedTitles.value = new Set(data.data.map(b => b.title))
     }
   } catch (error) {
@@ -1102,6 +1164,41 @@ async function fetchCloudBooks() {
 }
 
 // 同步书籍到云端
+function findLocalCategoryForBook(book) {
+  if (!book || book.category_id === null || book.category_id === undefined) {
+    return null
+  }
+
+  return categories.value.find(category => String(category.id) === String(book.category_id)) || null
+}
+
+async function syncCategoriesToCloud() {
+  if (!isLoggedIn.value || !categories.value.length) {
+    return null
+  }
+
+  const payload = {
+    categories: categories.value.map(category => ({
+      localId: String(category.id),
+      localCategoryId: category.id,
+      name: category.name,
+      color: category.color || '#667eea'
+    }))
+  }
+
+  const response = await authFetch('http://localhost:8080/api/categories/sync', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+
+  const data = await response.json()
+  if (!data.success) {
+    throw new Error(data.message || '分类同步失败')
+  }
+
+  return data.data
+}
+
 async function syncBookToCloud(book, event) {
   // 阻止事件冒泡，避免触发卡片点击
   if (event) {
@@ -1129,6 +1226,8 @@ async function syncBookToCloud(book, event) {
   
   try {
     // 1. 从本地读取 EPUB 文件
+    await syncCategoriesToCloud()
+
     const fileResult = await window.electronAPI.readBookFile(book.book_path)
     if (!fileResult.success) {
       alert('读取书籍文件失败：' + fileResult.error)
@@ -1157,6 +1256,12 @@ async function syncBookToCloud(book, event) {
     formData.append('description', book.description || '')
     formData.append('coverPath', book.cover_path || '')
     formData.append('bookPath', book.book_path || '')
+
+    const localCategory = findLocalCategoryForBook(book)
+    if (localCategory) {
+      formData.append('localCategoryId', String(localCategory.id))
+      formData.append('categoryName', localCategory.name)
+    }
     
     // 4. 发送请求
     
@@ -1241,6 +1346,14 @@ watch(showSettings, (val) => {
   if (val) {
     loadStorageInfo()
     showCloudStorage.value = false
+  }
+})
+
+watch(showLoginDialog, async (val) => {
+  if (val) {
+    await refreshCaptcha()
+  } else {
+    clearCaptchaImage()
   }
 })
 
@@ -1976,6 +2089,45 @@ function handleImageError(event) {
 .form-group input:focus {
   outline: none;
   border-color: #667eea;
+}
+
+.captcha-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.captcha-row input {
+  flex: 1;
+}
+
+.captcha-image-button {
+  width: 112px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #f8f9fa;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.captcha-image-button:hover {
+  border-color: #667eea;
+}
+
+.captcha-image-button img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.captcha-tip {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #888;
 }
 
 .color-picker-section {
